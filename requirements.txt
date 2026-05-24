@@ -1,0 +1,8 @@
+# Gate.io MA10 趋势监控系统依赖清单
+# 安装方式: pip install -r requirements.txt
+
+# Web框架
+flask>=2.0.0
+
+# HTTP请求
+requests>=2.25.0

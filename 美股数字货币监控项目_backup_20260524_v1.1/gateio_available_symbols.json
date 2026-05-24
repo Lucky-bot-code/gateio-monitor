@@ -1,0 +1,210 @@
+{
+  "available": [
+    {
+      "user_symbol": "BTCUSDT",
+      "contract": "BTC_USDT",
+      "last": 76946.1,
+      "change_percentage": 2.97
+    },
+    {
+      "user_symbol": "ETHUSDT",
+      "contract": "ETH_USDT",
+      "last": 2122.32,
+      "change_percentage": 4.59
+    },
+    {
+      "user_symbol": "SOLUSDT",
+      "contract": "SOL_USDT",
+      "last": 86.54,
+      "change_percentage": 5.51
+    },
+    {
+      "user_symbol": "HYPEUSDT",
+      "contract": "HYPE_USDT",
+      "last": 64.248,
+      "change_percentage": 15.51
+    },
+    {
+      "user_symbol": "ZECUSDT",
+      "contract": "ZEC_USDT",
+      "last": 649.01,
+      "change_percentage": 9.23
+    },
+    {
+      "user_symbol": "NEARUSDT",
+      "contract": "NEAR_USDT",
+      "last": 2.3681,
+      "change_percentage": 13.63
+    },
+    {
+      "user_symbol": "CLUSDT",
+      "contract": "CL_USDT",
+      "last": 90.64,
+      "change_percentage": -8.13
+    },
+    {
+      "user_symbol": "BSBUSDT",
+      "contract": "BSB_USDT",
+      "last": 1.23651,
+      "change_percentage": -7.41
+    },
+    {
+      "user_symbol": "XRPUSDT",
+      "contract": "XRP_USDT",
+      "last": 1.3635,
+      "change_percentage": 3.55
+    },
+    {
+      "user_symbol": "BEATUSDT",
+      "contract": "BEAT_USDT",
+      "last": 1.2441,
+      "change_percentage": -1.78
+    },
+    {
+      "user_symbol": "DOGEUSDT",
+      "contract": "DOGE_USDT",
+      "last": 0.10314,
+      "change_percentage": 3.72
+    },
+    {
+      "user_symbol": "SUIUSDT",
+      "contract": "SUI_USDT",
+      "last": 1.0646,
+      "change_percentage": 6.43
+    },
+    {
+      "user_symbol": "ONDOUSDT",
+      "contract": "ONDO_USDT",
+      "last": 0.4383,
+      "change_percentage": 11.75
+    },
+    {
+      "user_symbol": "GMTUSDT",
+      "contract": "GMT_USDT",
+      "last": 0.01184,
+      "change_percentage": -6.33
+    },
+    {
+      "user_symbol": "INUSDT",
+      "contract": "IN_USDT",
+      "last": 0.10926,
+      "change_percentage": 45.74
+    },
+    {
+      "user_symbol": "GRASSUSDT",
+      "contract": "GRASS_USDT",
+      "last": 0.5476,
+      "change_percentage": 32.85
+    },
+    {
+      "user_symbol": "XAUUSDT",
+      "contract": "XAU_USDT",
+      "last": 4551.81,
+      "change_percentage": 0.89
+    },
+    {
+      "user_symbol": "XAGUSDT",
+      "contract": "XAG_USDT",
+      "last": 77.29,
+      "change_percentage": 2.45
+    },
+    {
+      "user_symbol": "BILLUSDT",
+      "contract": "BILL_USDT",
+      "last": 0.09503,
+      "change_percentage": 15.47
+    },
+    {
+      "user_symbol": "TAOUSDT",
+      "contract": "TAO_USDT",
+      "last": 281.7,
+      "change_percentage": 8.14
+    },
+    {
+      "user_symbol": "EDENUSDT",
+      "contract": "EDEN_USDT",
+      "last": 0.09161,
+      "change_percentage": -5.94
+    },
+    {
+      "user_symbol": "WLDUSDT",
+      "contract": "WLD_USDT",
+      "last": 0.3057,
+      "change_percentage": 15.62
+    },
+    {
+      "user_symbol": "MUUSDT",
+      "contract": "MU_USDT",
+      "last": 778.2,
+      "change_percentage": 4.4
+    },
+    {
+      "user_symbol": "SNDKUSDT",
+      "contract": "SNDK_USDT",
+      "last": 1510.09,
+      "change_percentage": 2.27
+    },
+    {
+      "user_symbol": "SOXLUSDT",
+      "contract": "SOXL_USDT",
+      "last": 193.97,
+      "change_percentage": 2.46
+    },
+    {
+      "user_symbol": "EWYUSDT",
+      "contract": "EWY_USDT",
+      "last": 188.43,
+      "change_percentage": 5.2
+    },
+    {
+      "user_symbol": "INTCUSDT",
+      "contract": "INTC_USDT",
+      "last": 123.16,
+      "change_percentage": 4.91
+    },
+    {
+      "user_symbol": "DRAMUSDT",
+      "contract": "DRAM_USDT",
+      "last": 55.4,
+      "change_percentage": 7.28
+    },
+    {
+      "user_symbol": "CBRSUSDT",
+      "contract": "CBRS_USDT",
+      "last": 261.1,
+      "change_percentage": 5.11
+    },
+    {
+      "user_symbol": "AMDUSDT",
+      "contract": "AMD_USDT",
+      "last": 475.89,
+      "change_percentage": 2.91
+    },
+    {
+      "user_symbol": "QCOMUSDT",
+      "contract": "QCOM_USDT",
+      "last": 239.51,
+      "change_percentage": -0.03
+    },
+    {
+      "user_symbol": "TSMUSDT",
+      "contract": "TSM_USDT",
+      "last": 411.87,
+      "change_percentage": 1.78
+    }
+  ],
+  "unavailable": [
+    "1000PEPEUSDT",
+    "NVDAUSDT",
+    "QQQUSDT",
+    "CRCLUSDT",
+    "MSTRUSDT",
+    "SPYUSDT",
+    "TSLAUSDT",
+    "GOOGLUSDT",
+    "COINUSDT",
+    "NATGASUSDT",
+    "AMZNUSDT"
+  ],
+  "total": 43
+}

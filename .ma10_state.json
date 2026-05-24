@@ -1,0 +1,450 @@
+{
+  "BTCUSDT": {
+    "日K": {
+      "trend": "连续下跌",
+      "consecutive": 10
+    },
+    "60分钟": {
+      "trend": "短期下跌",
+      "consecutive": 1
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 8
+    }
+  },
+  "ETHUSDT": {
+    "日K": {
+      "trend": "连续下跌",
+      "consecutive": 13
+    },
+    "60分钟": {
+      "trend": "连续下跌",
+      "consecutive": 3
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 8
+    }
+  },
+  "SOLUSDT": {
+    "日K": {
+      "trend": "连续下跌",
+      "consecutive": 9
+    },
+    "60分钟": {
+      "trend": "短期下跌",
+      "consecutive": 1
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 6
+    }
+  },
+  "HYPEUSDT": {
+    "日K": {
+      "trend": "连续上涨",
+      "consecutive": 8
+    },
+    "60分钟": {
+      "trend": "连续上涨",
+      "consecutive": 25
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 3
+    }
+  },
+  "ZECUSDT": {
+    "日K": {
+      "trend": "连续上涨",
+      "consecutive": 5
+    },
+    "60分钟": {
+      "trend": "连续上涨",
+      "consecutive": 7
+    },
+    "15分钟": {
+      "trend": "短期上涨",
+      "consecutive": 1
+    }
+  },
+  "NEARUSDT": {
+    "日K": {
+      "trend": "连续上涨",
+      "consecutive": 19
+    },
+    "60分钟": {
+      "trend": "短期上涨",
+      "consecutive": 2
+    },
+    "15分钟": {
+      "trend": "连续上涨",
+      "consecutive": 9
+    }
+  },
+  "CLUSDT": {
+    "日K": {
+      "trend": "连续下跌",
+      "consecutive": 3
+    },
+    "60分钟": {
+      "trend": "短期上涨",
+      "consecutive": 2
+    },
+    "15分钟": {
+      "trend": "连续上涨",
+      "consecutive": 14
+    }
+  },
+  "BSBUSDT": {
+    "日K": {
+      "trend": "连续上涨",
+      "consecutive": 8
+    },
+    "60分钟": {
+      "trend": "连续下跌",
+      "consecutive": 5
+    },
+    "15分钟": {
+      "trend": "短期下跌",
+      "consecutive": 1
+    }
+  },
+  "XRPUSDT": {
+    "日K": {
+      "trend": "连续下跌",
+      "consecutive": 7
+    },
+    "60分钟": {
+      "trend": "短期下跌",
+      "consecutive": 2
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 12
+    }
+  },
+  "BEATUSDT": {
+    "日K": {
+      "trend": "连续上涨",
+      "consecutive": 12
+    },
+    "60分钟": {
+      "trend": "连续下跌",
+      "consecutive": 7
+    },
+    "15分钟": {
+      "trend": "连续上涨",
+      "consecutive": 6
+    }
+  },
+  "DOGEUSDT": {
+    "日K": {
+      "trend": "连续下跌",
+      "consecutive": 7
+    },
+    "60分钟": {
+      "trend": "连续下跌",
+      "consecutive": 3
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 4
+    }
+  },
+  "SUIUSDT": {
+    "日K": {
+      "trend": "连续下跌",
+      "consecutive": 6
+    },
+    "60分钟": {
+      "trend": "连续下跌",
+      "consecutive": 9
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 13
+    }
+  },
+  "ONDOUSDT": {
+    "日K": {
+      "trend": "短期上涨",
+      "consecutive": 2
+    },
+    "60分钟": {
+      "trend": "连续上涨",
+      "consecutive": 31
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 3
+    }
+  },
+  "GMTUSDT": {
+    "日K": {
+      "trend": "短期下跌",
+      "consecutive": 1
+    },
+    "60分钟": {
+      "trend": "连续下跌",
+      "consecutive": 16
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 3
+    }
+  },
+  "INUSDT": {
+    "日K": {
+      "trend": "连续上涨",
+      "consecutive": 3
+    },
+    "60分钟": {
+      "trend": "连续下跌",
+      "consecutive": 4
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 15
+    }
+  },
+  "GRASSUSDT": {
+    "日K": {
+      "trend": "连续上涨",
+      "consecutive": 4
+    },
+    "60分钟": {
+      "trend": "短期下跌",
+      "consecutive": 1
+    },
+    "15分钟": {
+      "trend": "连续上涨",
+      "consecutive": 8
+    }
+  },
+  "XAUUSDT": {
+    "日K": {
+      "trend": "连续下跌",
+      "consecutive": 10
+    },
+    "60分钟": {
+      "trend": "连续下跌",
+      "consecutive": 5
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 18
+    }
+  },
+  "XAGUSDT": {
+    "日K": {
+      "trend": "连续下跌",
+      "consecutive": 9
+    },
+    "60分钟": {
+      "trend": "连续下跌",
+      "consecutive": 6
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 10
+    }
+  },
+  "BILLUSDT": {
+    "日K": {
+      "trend": "数据不足",
+      "consecutive": 0
+    },
+    "60分钟": {
+      "trend": "连续上涨",
+      "consecutive": 8
+    },
+    "15分钟": {
+      "trend": "短期上涨",
+      "consecutive": 2
+    }
+  },
+  "TAOUSDT": {
+    "日K": {
+      "trend": "连续下跌",
+      "consecutive": 10
+    },
+    "60分钟": {
+      "trend": "连续下跌",
+      "consecutive": 5
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 15
+    }
+  },
+  "EDENUSDT": {
+    "日K": {
+      "trend": "连续上涨",
+      "consecutive": 9
+    },
+    "60分钟": {
+      "trend": "连续下跌",
+      "consecutive": 11
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 4
+    }
+  },
+  "WLDUSDT": {
+    "日K": {
+      "trend": "连续上涨",
+      "consecutive": 3
+    },
+    "60分钟": {
+      "trend": "短期下跌",
+      "consecutive": 1
+    },
+    "15分钟": {
+      "trend": "短期下跌",
+      "consecutive": 2
+    }
+  },
+  "MUUSDT": {
+    "日K": {
+      "trend": "连续下跌",
+      "consecutive": 7
+    },
+    "60分钟": {
+      "trend": "短期下跌",
+      "consecutive": 2
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 10
+    }
+  },
+  "SNDKUSDT": {
+    "日K": {
+      "trend": "连续上涨",
+      "consecutive": 3
+    },
+    "60分钟": {
+      "trend": "短期下跌",
+      "consecutive": 1
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 3
+    }
+  },
+  "SOXLUSDT": {
+    "日K": {
+      "trend": "数据不足",
+      "consecutive": 0
+    },
+    "60分钟": {
+      "trend": "连续上涨",
+      "consecutive": 4
+    },
+    "15分钟": {
+      "trend": "短期下跌",
+      "consecutive": 1
+    }
+  },
+  "EWYUSDT": {
+    "日K": {
+      "trend": "短期下跌",
+      "consecutive": 2
+    },
+    "60分钟": {
+      "trend": "连续上涨",
+      "consecutive": 5
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 4
+    }
+  },
+  "INTCUSDT": {
+    "日K": {
+      "trend": "连续上涨",
+      "consecutive": 3
+    },
+    "60分钟": {
+      "trend": "短期下跌",
+      "consecutive": 1
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 11
+    }
+  },
+  "DRAMUSDT": {
+    "日K": {
+      "trend": "数据不足",
+      "consecutive": 0
+    },
+    "60分钟": {
+      "trend": "短期下跌",
+      "consecutive": 1
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 6
+    }
+  },
+  "CBRSUSDT": {
+    "日K": {
+      "trend": "数据不足",
+      "consecutive": 0
+    },
+    "60分钟": {
+      "trend": "短期下跌",
+      "consecutive": 1
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 5
+    }
+  },
+  "AMDUSDT": {
+    "日K": {
+      "trend": "连续上涨",
+      "consecutive": 3
+    },
+    "60分钟": {
+      "trend": "短期下跌",
+      "consecutive": 1
+    },
+    "15分钟": {
+      "trend": "短期下跌",
+      "consecutive": 2
+    }
+  },
+  "QCOMUSDT": {
+    "日K": {
+      "trend": "连续上涨",
+      "consecutive": 3
+    },
+    "60分钟": {
+      "trend": "连续上涨",
+      "consecutive": 5
+    },
+    "15分钟": {
+      "trend": "连续下跌",
+      "consecutive": 4
+    }
+  },
+  "TSMUSDT": {
+    "日K": {
+      "trend": "短期下跌",
+      "consecutive": 1
+    },
+    "60分钟": {
+      "trend": "短期上涨",
+      "consecutive": 2
+    },
+    "15分钟": {
+      "trend": "连续上涨",
+      "consecutive": 8
+    }
+  }
+}
