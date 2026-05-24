@@ -1,0 +1,15 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime state files
+.ma10_state.json
+.monitor_state.json
+
+# Backup folders
+*_backup_*/
+
+# IDE
+.vscode/
+.idea/
