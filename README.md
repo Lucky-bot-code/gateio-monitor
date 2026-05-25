@@ -159,7 +159,6 @@ python gateio_futures_monitor.py
 ├── requirements.txt                # Python 依赖清单
 ├── README.md                       # 本文件
 ├── CLAUDE.md                       # 项目详细文档
-├── gateio_ma10_monitor.py          # 现货版监控（历史版本）
 └── test_*.py                       # 各类 API 测试脚本
 ```
 
