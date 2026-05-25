@@ -8,6 +8,8 @@ import os
 import sys
 import json
 import time
+import socket
+import subprocess
 import threading
 import requests
 from datetime import datetime
@@ -442,7 +444,19 @@ HTML_TEMPLATE = """
             padding-bottom: 10px;
             border-bottom: 1px solid var(--border);
         }
-        .card-title { font-size: 1.1rem; font-weight: 600; }
+        .card-title { font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .card-pos {
+            cursor: pointer; font-size: 0.9rem; font-weight: 700;
+            width: 28px; height: 28px; border-radius: 6px;
+            display: inline-flex; align-items: center; justify-content: center;
+            border: 1px solid var(--border); color: var(--text-secondary);
+            transition: all 0.2s; user-select: none; background: transparent;
+        }
+        .card-pos:hover { transform: scale(1.1); border-color: var(--text-secondary); }
+        .card-pos.long { background: var(--up-bg); color: var(--up); border-color: var(--up); }
+        .card-pos.short { background: var(--down-bg); color: var(--down); border-color: var(--down); }
+        .card.long { border-color: var(--up); box-shadow: 0 0 0 1px var(--up), 0 8px 24px rgba(16,185,129,0.12); }
+        .card.short { border-color: var(--down); box-shadow: 0 0 0 1px var(--down), 0 8px 24px rgba(239,68,68,0.12); }
         .card-price { text-align: right; }
         .card-price .last { font-size: 1.1rem; font-weight: 600; }
         .card-price .change { font-size: 0.8rem; margin-top: 2px; }
@@ -568,6 +582,35 @@ HTML_TEMPLATE = """
         let countdownTimer;
         let dataCache = null;
         let alertsCache = [];
+        const POSITIONS_KEY = 'ma10_positions';
+
+        function loadPositions() {
+            try {
+                const raw = localStorage.getItem(POSITIONS_KEY);
+                return raw ? JSON.parse(raw) : {};
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function savePositions(positions) {
+            localStorage.setItem(POSITIONS_KEY, JSON.stringify(positions));
+        }
+
+        function cyclePosition(symbol) {
+            const positions = loadPositions();
+            const current = positions[symbol];
+            // 三态循环: null → long → short → null
+            if (current === 'long') {
+                positions[symbol] = 'short';
+            } else if (current === 'short') {
+                delete positions[symbol];
+            } else {
+                positions[symbol] = 'long';
+            }
+            savePositions(positions);
+            renderCards(dataCache, alertsCache);
+        }
 
         function getTrendClass(trend) {
             if (trend === '连续上涨') return 'trend-up';
@@ -588,6 +631,7 @@ HTML_TEMPLATE = """
             const grid = document.getElementById('grid');
             let html = '';
             let stats = { total: data.length, dayUp: 0, dayDown: 0, hourUp: 0, hourDown: 0, minUp: 0, minDown: 0 };
+            const positions = loadPositions();
 
             const symAlerts = {};
             alerts.forEach(a => {
@@ -595,7 +639,14 @@ HTML_TEMPLATE = """
                 symAlerts[a.symbol].push(a);
             });
 
-            data.forEach(item => {
+            // 有持仓的卡片置顶 (short > long > 无)
+            const posWeight = (p) => p === 'short' ? 2 : (p === 'long' ? 1 : 0);
+            const sortedData = [...data].sort((a, b) => {
+                return posWeight(positions[b.symbol]) - posWeight(positions[a.symbol]);
+            });
+
+            sortedData.forEach(item => {
+                const pos = positions[item.symbol] || null;
                 const changeClass = item.change_pct > 0 ? 'change-up' : (item.change_pct < 0 ? 'change-down' : '');
                 const changeSign = item.change_pct > 0 ? '+' : '';
 
@@ -639,11 +690,18 @@ HTML_TEMPLATE = """
                     cardAlertsHtml += `<div class="card-alert ${cls}">${arrow} ${a.interval}${text} (已${a.consecutive}周期)${pct}</div>`;
                 });
 
+                const posLabel = pos ? (pos === 'long' ? '多' : '空') : '';
+                const posClass = pos || '';
+                const cardClass = pos ? `card ${pos}` : 'card';
+
                 html += `
-                    <div class="card">
+                    <div class="${cardClass}">
                         ${cardAlertsHtml}
                         <div class="card-header">
-                            <div class="card-title">${item.symbol}</div>
+                            <div class="card-title">
+                                <span class="card-pos ${posClass}" onclick="cyclePosition('${item.symbol}')" title="点击切换: 无持仓 → 做多 → 做空">${posLabel || '＋'}</span>
+                                ${item.symbol}
+                            </div>
                             <div class="card-price">
                                 <div class="last">${formatPrice(item.last)}</div>
                                 <div class="change ${changeClass}">${changeSign}${item.change_pct !== null ? item.change_pct.toFixed(2) : '-'}%</div>
@@ -791,10 +849,44 @@ def api_refresh():
     return jsonify({"status": "started"})
 
 
+def is_port_in_use(port: int) -> bool:
+    """检测端口是否被占用"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def kill_process_on_port(port: int):
+    """Windows 下结束占用指定端口的进程"""
+    try:
+        result = subprocess.run(["netstat", "-ano"], capture_output=True, text=True)
+        killed = []
+        for line in result.stdout.splitlines():
+            if f":{port}" in line and "LISTENING" in line:
+                parts = line.strip().split()
+                if len(parts) >= 5:
+                    pid = parts[-1]
+                    if pid not in killed:
+                        subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True)
+                        killed.append(pid)
+        if killed:
+            print(f"  已结束占用端口 {port} 的进程: PID {', '.join(killed)}")
+            time.sleep(1)
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("Gate.io MA10 趋势监控 Web面板")
     print("=" * 60)
+
+    if is_port_in_use(PORT):
+        print(f"端口 {PORT} 被占用，正在清理旧进程...")
+        kill_process_on_port(PORT)
+        if is_port_in_use(PORT):
+            print(f"清理失败，尝试使用备用端口 {PORT + 1}...")
+            PORT += 1
+
     print(f"访问地址:")
     print(f"  本机: http://127.0.0.1:{PORT}")
     print(f"  局域网: http://你的电脑IP:{PORT}")
