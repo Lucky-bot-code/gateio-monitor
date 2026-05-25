@@ -6,6 +6,7 @@ __pycache__/
 # Runtime state files
 .ma10_state.json
 .monitor_state.json
+positions.json
 
 # Backup folders
 *_backup_*/

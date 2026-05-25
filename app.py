@@ -11,10 +11,13 @@ import time
 import socket
 import subprocess
 import threading
+import logging
+import importlib.metadata
+import webbrowser
 import requests
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template_string, request
 
 # ============ 配置 ============
 BASE_URL = "https://api.gateio.ws/api/v4"
@@ -35,8 +38,14 @@ cache = {
     "alerts": []
 }
 
+# 浏览器自动打开标志（只打开一次）
+_browser_opened = False
+
 # 预警持久化文件（用于跨重启保留上一次状态）
 ALERT_STATE_FILE = ".ma10_state.json"
+
+# 持仓标记持久化文件
+POSITIONS_FILE = "positions.json"
 
 # 微信通知配置（企业微信机器人 Webhook）
 # 获取方式：在企业微信群 → 添加群机器人 → 复制 Webhook 地址
@@ -124,6 +133,61 @@ def save_state(state: Dict):
         pass
 
 
+def load_positions() -> Dict:
+    if os.path.exists(POSITIONS_FILE):
+        try:
+            with open(POSITIONS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_positions(positions: Dict):
+    try:
+        with open(POSITIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(positions, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def print_banner():
+    """打印黑客风格启动画面"""
+    print(r"""
+   +=======================================================+
+   |                                                       |
+   |     G A T E . I O   M A 1 0   M O N I T O R         |
+   |              Protocol v1.2  //  ONLINE                |
+   |                                                       |
+   +=======================================================+
+""")
+    time.sleep(0.05)
+    print("[INIT] Loading core modules...")
+    time.sleep(0.05)
+    print("[INIT] Engaging network handshake protocol...")
+    time.sleep(0.05)
+    print("[ OK ] Module: requests  v" + requests.__version__)
+    print("[ OK ] Module: flask     v" + importlib.metadata.version("flask"))
+    print("[ OK ] Module: threading (ready)")
+    print("-" * 55)
+
+
+def print_progress(current: int, total: int, symbol: str = ""):
+    """在同一行打印进度条"""
+    bar_len = 30
+    filled = int(bar_len * current // total)
+    bar = "█" * filled + "░" * (bar_len - filled)
+    pct = int(100 * current / total)
+    sym = f" | {symbol:<8}" if symbol else ""
+    print(f"\r[PROG] [{bar}] {pct:>3}%{sym}", end="", flush=True)
+    if current >= total:
+        print()
+
+
+# 全局持仓标记（从文件加载）
+user_positions = load_positions()
+
+
 class MonitorCore:
     def __init__(self):
         self.session = requests.Session()
@@ -201,7 +265,11 @@ class MonitorCore:
 
     def analyze_all(self) -> List[Dict]:
         results = []
-        for sym_info in self.symbols:
+        total = len(self.symbols)
+        if total == 0:
+            return results
+        print("[SYNC] Acquiring market data stream...")
+        for idx, sym_info in enumerate(self.symbols, 1):
             contract = sym_info["contract"]
             user_symbol = sym_info.get("user_symbol", contract)
             result = {"symbol": user_symbol, "contract": contract, "intervals": []}
@@ -221,7 +289,7 @@ class MonitorCore:
             time.sleep(REQUEST_DELAY)
 
             # 各周期
-            for interval, interval_name in [("1d", "日K"), ("1h", "60分钟"), ("15m", "15分钟")]:
+            for interval, interval_name in [("1d", "日K"), ("4h", "4小时"), ("1h", "60分钟"), ("15m", "15分钟")]:
                 klines = self.fetch_klines(contract, interval, limit=KLINES_LIMIT)
                 time.sleep(REQUEST_DELAY)
 
@@ -266,6 +334,8 @@ class MonitorCore:
                 })
 
             results.append(result)
+            print_progress(idx, total, user_symbol)
+        print(f"[ OK ] Data acquisition complete. {total} assets monitored.")
         return results
 
 
@@ -276,6 +346,7 @@ def refresh_data():
         return
     cache["updating"] = True
     cache["error"] = None
+    print("[SYNC] Initiating market data synchronization...")
     try:
         monitor = MonitorCore()
         if not monitor.symbols:
@@ -334,6 +405,15 @@ def refresh_data():
         cache["error"] = str(e)
     finally:
         cache["updating"] = False
+        global _browser_opened
+        if not _browser_opened:
+            _browser_opened = True
+            url = f"http://127.0.0.1:{PORT}"
+            def delayed_open():
+                time.sleep(1)
+                webbrowser.open(url)
+                print(f"[AUTO] Browser opened: {url}")
+            threading.Thread(target=delayed_open, daemon=True).start()
 
 
 def auto_refresh_loop():
@@ -341,12 +421,6 @@ def auto_refresh_loop():
     while True:
         time.sleep(AUTO_REFRESH_INTERVAL)
         refresh_data()
-
-
-# 启动时立即刷新一次
-refresh_data()
-# 启动后台线程
-threading.Thread(target=auto_refresh_loop, daemon=True).start()
 
 
 # ============ HTML模板 ============
@@ -462,7 +536,8 @@ HTML_TEMPLATE = """
         .card-price .change { font-size: 0.8rem; margin-top: 2px; }
         .change-up { color: var(--up); }
         .change-down { color: var(--down); }
-        .intervals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .intervals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+        @media (max-width: 560px) { .intervals { grid-template-columns: repeat(2, 1fr); } }
         @media (max-width: 400px) { .intervals { grid-template-columns: 1fr; } }
         .interval-item {
             border-radius: 8px;
@@ -518,7 +593,10 @@ HTML_TEMPLATE = """
             border-radius: 6px;
             font-size: 0.75rem;
             font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.2s;
         }
+        .alert-badge:hover { opacity: 0.85; transform: translateY(-1px); }
         .alert-badge.down { background: var(--down-bg); color: var(--down); border: 1px solid var(--down); }
         .alert-badge.up { background: var(--up-bg); color: var(--up); border: 1px solid var(--up); }
         .card-alert {
@@ -557,6 +635,8 @@ HTML_TEMPLATE = """
         <div class="stat">标的数: <span id="statTotal">-</span></div>
         <div class="stat">日K上涨: <span id="statDayUp">-</span></div>
         <div class="stat">日K下跌: <span id="statDayDown">-</span></div>
+        <div class="stat">4小时上涨: <span id="stat4hUp">-</span></div>
+        <div class="stat">4小时下跌: <span id="stat4hDown">-</span></div>
         <div class="stat">60分钟上涨: <span id="statHourUp">-</span></div>
         <div class="stat">60分钟下跌: <span id="statHourDown">-</span></div>
         <div class="stat">15分钟上涨: <span id="statMinUp">-</span></div>
@@ -583,33 +663,65 @@ HTML_TEMPLATE = """
         let dataCache = null;
         let alertsCache = [];
         const POSITIONS_KEY = 'ma10_positions';
+        let positionsCache = {};
 
-        function loadPositions() {
+        async function loadPositionsFromServer() {
             try {
-                const raw = localStorage.getItem(POSITIONS_KEY);
-                return raw ? JSON.parse(raw) : {};
+                const res = await fetch('/api/positions');
+                const data = await res.json();
+                positionsCache = data || {};
+                localStorage.setItem(POSITIONS_KEY, JSON.stringify(positionsCache));
             } catch (e) {
-                return {};
+                const raw = localStorage.getItem(POSITIONS_KEY);
+                positionsCache = raw ? JSON.parse(raw) : {};
             }
         }
 
+        function loadPositions() {
+            return positionsCache;
+        }
+
         function savePositions(positions) {
+            positionsCache = positions;
             localStorage.setItem(POSITIONS_KEY, JSON.stringify(positions));
         }
 
-        function cyclePosition(symbol) {
-            const positions = loadPositions();
+        function scrollToCard(symbol) {
+            const el = document.getElementById('card-' + symbol);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.style.transition = 'box-shadow 0.3s';
+                const originalShadow = el.style.boxShadow;
+                el.style.boxShadow = '0 0 0 2px var(--accent), 0 8px 24px rgba(59,130,246,0.3)';
+                setTimeout(() => { el.style.boxShadow = originalShadow; }, 1500);
+            }
+        }
+
+        async function cyclePosition(symbol) {
+            const positions = {...positionsCache};
             const current = positions[symbol];
-            // 三态循环: null → long → short → null
+            let newPos = null;
             if (current === 'long') {
+                newPos = 'short';
                 positions[symbol] = 'short';
             } else if (current === 'short') {
                 delete positions[symbol];
+                newPos = null;
             } else {
+                newPos = 'long';
                 positions[symbol] = 'long';
             }
             savePositions(positions);
             renderCards(dataCache, alertsCache);
+            try {
+                await fetch('/api/position', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({symbol, position: newPos})
+                });
+            } catch (e) {
+                console.error('同步持仓到服务器失败', e);
+            }
         }
 
         function getTrendClass(trend) {
@@ -630,7 +742,7 @@ HTML_TEMPLATE = """
         function renderCards(data, alerts) {
             const grid = document.getElementById('grid');
             let html = '';
-            let stats = { total: data.length, dayUp: 0, dayDown: 0, hourUp: 0, hourDown: 0, minUp: 0, minDown: 0 };
+            let stats = { total: data.length, dayUp: 0, dayDown: 0, fourHUp: 0, fourHDown: 0, hourUp: 0, hourDown: 0, minUp: 0, minDown: 0 };
             const positions = loadPositions();
 
             const symAlerts = {};
@@ -670,6 +782,10 @@ HTML_TEMPLATE = """
                         if (iv.trend === '连续上涨' || iv.trend === '短期上涨') stats.dayUp++;
                         if (iv.trend === '连续下跌' || iv.trend === '短期下跌') stats.dayDown++;
                     }
+                    if (iv.name === '4小时') {
+                        if (iv.trend === '连续上涨' || iv.trend === '短期上涨') stats.fourHUp++;
+                        if (iv.trend === '连续下跌' || iv.trend === '短期下跌') stats.fourHDown++;
+                    }
                     if (iv.name === '60分钟') {
                         if (iv.trend === '连续上涨' || iv.trend === '短期上涨') stats.hourUp++;
                         if (iv.trend === '连续下跌' || iv.trend === '短期下跌') stats.hourDown++;
@@ -695,7 +811,7 @@ HTML_TEMPLATE = """
                 const cardClass = pos ? `card ${pos}` : 'card';
 
                 html += `
-                    <div class="${cardClass}">
+                    <div class="${cardClass}" id="card-${item.symbol}">
                         ${cardAlertsHtml}
                         <div class="card-header">
                             <div class="card-title">
@@ -719,6 +835,8 @@ HTML_TEMPLATE = """
             document.getElementById('statTotal').textContent = stats.total;
             document.getElementById('statDayUp').textContent = stats.dayUp;
             document.getElementById('statDayDown').textContent = stats.dayDown;
+            document.getElementById('stat4hUp').textContent = stats.fourHUp;
+            document.getElementById('stat4hDown').textContent = stats.fourHDown;
             document.getElementById('statHourUp').textContent = stats.hourUp;
             document.getElementById('statHourDown').textContent = stats.hourDown;
             document.getElementById('statMinUp').textContent = stats.minUp;
@@ -734,7 +852,7 @@ HTML_TEMPLATE = """
                     const arrow = a.type === 'reversal_up' ? '↑' : '↓';
                     const text = a.type === 'reversal_up' ? '上涨转折' : '下跌转折';
                     const pct = a.reversal_pct !== null && a.reversal_pct !== undefined ? ` ${a.reversal_pct > 0 ? '+' : ''}${a.reversal_pct}%` : '';
-                    alertHtml += `<span class="alert-badge ${cls}">${arrow} ${a.symbol} ${a.interval}${text}${pct}</span>`;
+                    alertHtml += `<span class="alert-badge ${cls}" onclick="scrollToCard('${a.symbol}')" title="点击跳转到 ${a.symbol} 卡片">${arrow} ${a.symbol} ${a.interval}${text}${pct}</span>`;
                     if (a.type === 'reversal_up') hasUp = true;
                     else hasDown = true;
                 });
@@ -819,8 +937,10 @@ HTML_TEMPLATE = """
             }, 1000);
         }
 
-        loadData();
-        startCountdown();
+        loadPositionsFromServer().then(() => {
+            loadData();
+            startCountdown();
+        });
     </script>
 </body>
 </html>
@@ -847,6 +967,26 @@ def api_data():
 def api_refresh():
     threading.Thread(target=refresh_data, daemon=True).start()
     return jsonify({"status": "started"})
+
+
+@app.route("/api/positions", methods=["GET"])
+def api_positions():
+    return jsonify(user_positions)
+
+
+@app.route("/api/position", methods=["POST"])
+def api_position():
+    global user_positions
+    data = request.get_json() or {}
+    symbol = data.get("symbol")
+    position = data.get("position")
+    if symbol:
+        if position in ("long", "short"):
+            user_positions[symbol] = position
+        else:
+            user_positions.pop(symbol, None)
+        save_positions(user_positions)
+    return jsonify({"status": "ok", "positions": user_positions})
 
 
 def is_port_in_use(port: int) -> bool:
@@ -876,21 +1016,25 @@ def kill_process_on_port(port: int):
 
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("Gate.io MA10 趋势监控 Web面板")
-    print("=" * 60)
+    print_banner()
 
     if is_port_in_use(PORT):
-        print(f"端口 {PORT} 被占用，正在清理旧进程...")
+        print(f"[WARN] Port {PORT} occupied. Terminating process...")
         kill_process_on_port(PORT)
         if is_port_in_use(PORT):
-            print(f"清理失败，尝试使用备用端口 {PORT + 1}...")
+            print(f"[WARN] Fallback to alternate port {PORT + 1}")
             PORT += 1
 
-    print(f"访问地址:")
-    print(f"  本机: http://127.0.0.1:{PORT}")
-    print(f"  局域网: http://你的电脑IP:{PORT}")
-    print("=" * 60)
-    print("按 Ctrl+C 停止服务")
-    print("=" * 60)
-    app.run(host="0.0.0.0", port=PORT, debug=False)
+    print(f"[ OK ] Service endpoint: http://127.0.0.1:{PORT}")
+    print(f"[ OK ] LAN endpoint:    http://<local-ip>:{PORT}")
+    print("[INIT] Spawning background sync thread...")
+    print("-" * 55)
+
+    # 后台立即刷新 + 自动刷新
+    threading.Thread(target=refresh_data, daemon=True).start()
+    threading.Thread(target=auto_refresh_loop, daemon=True).start()
+
+    # 抑制 Flask 默认启动日志，避免与后台进度条交错
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
+    logging.getLogger("flask.app").setLevel(logging.ERROR)
+    app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False)
