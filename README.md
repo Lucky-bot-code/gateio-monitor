@@ -160,8 +160,6 @@ python gateio_futures_monitor.py
 ├── README.md                       # 本文件
 ├── CLAUDE.md                       # 项目详细文档
 ├── gateio_ma10_monitor.py          # 现货版监控（历史版本）
-├── binance_ma10_monitor.py         # Binance 版（备用）
-├── finnhub_monitor.py              # Finnhub 美股监控（备用）
 └── test_*.py                       # 各类 API 测试脚本
 ```
 
