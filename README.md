@@ -158,8 +158,7 @@ python gateio_futures_monitor.py
 ├── gateio_futures_scan.py          # 合约市场标的扫描器
 ├── requirements.txt                # Python 依赖清单
 ├── README.md                       # 本文件
-├── CLAUDE.md                       # 项目详细文档
-└── test_*.py                       # 各类 API 测试脚本
+└── CLAUDE.md                       # 项目详细文档
 ```
 
 ---
