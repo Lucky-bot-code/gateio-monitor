@@ -1,0 +1,206 @@
+# Gate.io MA10 趋势监控系统
+
+基于 **Gate.io U本位永续合约 API** 的 MA10（10周期移动平均线）趋势监控系统。支持 **Web 可视化面板** 和 **命令行脚本** 两种使用方式，实时监控加密货币与美股代币的多周期趋势。
+
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
+[![Flask](https://img.shields.io/badge/Flask-2.0%2B-green)](https://flask.palletsprojects.com/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
+---
+
+## 功能特点
+
+- **三周期监控**：日K、60分钟、15分钟三个时间周期的 MA10 趋势方向
+- **自动筛选标的**：不可用的合约自动剔除，只监控有效标的
+- **趋势转折预警**：MA10 从连续上涨转为连续下跌（或相反）时自动检测
+- **企业微信推送**：支持通过企业微信机器人推送转折预警
+- **持仓方向标记**：Web 面板可标记多空持仓，数据持久化保存
+- **暗色主题面板**：响应式布局，手机/电脑均可访问，支持添加到手机主屏幕
+- **中国大陆网络直连**：Gate.io API 无需代理即可访问
+- **零成本运行**：Gate.io API 完全免费
+
+---
+
+## 快速开始
+
+### 安装依赖
+
+```bash
+pip install -r requirements.txt
+```
+
+或手动安装：
+
+```bash
+pip install flask requests
+```
+
+### 启动 Web 面板（推荐）
+
+```bash
+python app.py
+```
+
+启动后控制台输出：
+
+```
+访问地址:
+  本机: http://127.0.0.1:5000
+  局域网: http://192.168.x.x:5000
+```
+
+- **电脑访问**：`http://127.0.0.1:5000`
+- **手机访问（同一 WiFi）**：`http://192.168.x.x:5000`
+
+### 命令行版（备用）
+
+```bash
+python gateio_futures_monitor.py
+```
+
+在终端直接输出所有标的的 MA10 趋势分析。
+
+---
+
+## 监控标的（32个）
+
+| 类型 | 标的 |
+|------|------|
+| **加密货币** | BTC, ETH, SOL, HYPE, ZEC, NEAR, CL(原油), BSB, XRP, BEAT, DOGE, SUI, ONDO, GMT, IN, GRASS, XAU(黄金), XAG(白银), BILL, TAO, EDEN, WLD |
+| **美股/ETF** | MU, SNDK, SOXL, EWY, INTC, DRAM, CBRS, AMD, QCOM, TSM |
+
+> **不可用标的（已剔除）**：1000PEPE, NVDA, QQQ, CRCL, MSTR, SPY, TSLA, GOOGL, COIN, NATGAS, AMZN —— Gate.io 未上线这些合约。
+
+---
+
+## Web 面板说明
+
+### 页面布局
+
+| 区域 | 内容 |
+|------|------|
+| **顶部栏** | 标题 / 最后更新时间 / 手动刷新按钮 / 自动刷新倒计时 |
+| **统计栏** | 各周期上涨/下跌数量统计 |
+| **卡片网格** | 每个标的一张卡片，桌面多列、手机单列 |
+
+### 卡片内容
+
+- **左上**：标的名称（如 BTCUSDT）
+- **右上**：最新价 + 24h 涨跌幅（绿色涨 / 红色跌）
+- **下方三格**：日K / 60分钟 / 15分钟 趋势状态
+
+### 趋势颜色编码
+
+| 趋势状态 | 背景 | 文字 | 说明 |
+|----------|------|------|------|
+| 连续上涨 | 深绿色 | 绿色 | MA10 连续 >=3 周期上涨 |
+| 连续下跌 | 深红色 | 红色 | MA10 连续 >=3 周期下跌 |
+| 短期上涨 | 浅绿色 | 绿色 | MA10 1-2 周期上涨 |
+| 短期下跌 | 浅红色 | 红色 | MA10 1-2 周期下跌 |
+| 震荡 | 灰色 | 灰色 | MA10 无明显方向 |
+| 数据不足 | 灰色 | 灰色 | K 线数据不足 |
+
+### 刷新机制
+
+- **自动刷新**：每 5 分钟（300秒）后台自动获取最新数据
+- **手动刷新**：点击右上角"刷新数据"按钮，约 45 秒完成
+- **缓存读取**：刷新期间前端仍显示旧数据，不会空白
+
+---
+
+## API 端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/` | GET | 渲染主页面（HTML） |
+| `/api/data` | GET | 获取当前监控数据（JSON） |
+| `/api/refresh` | POST | 触发后台数据刷新（异步） |
+
+### `/api/data` 返回示例
+
+```json
+{
+  "data": [
+    {
+      "symbol": "BTCUSDT",
+      "contract": "BTC_USDT",
+      "last": 76965.8,
+      "change_pct": 3.04,
+      "intervals": [
+        {
+          "name": "日K",
+          "interval": "1d",
+          "trend": "连续下跌",
+          "consecutive": 10,
+          "ma10": 77264.17,
+          "close": 76965.8,
+          "deviation": -0.39,
+          "candles_count": 50
+        }
+      ]
+    }
+  ],
+  "last_update": "2026-05-24 18:06:37",
+  "updating": false,
+  "error": null
+}
+```
+
+---
+
+## 文件结构
+
+```
+.
+├── app.py                          # Flask Web 面板主程序
+├── gateio_available_symbols.json   # 可用标的列表配置
+├── gateio_futures_monitor.py       # 命令行版监控脚本
+├── gateio_futures_scan.py          # 合约市场标的扫描器
+├── requirements.txt                # Python 依赖清单
+├── README.md                       # 本文件
+├── CLAUDE.md                       # 项目详细文档
+├── gateio_ma10_monitor.py          # 现货版监控（历史版本）
+├── binance_ma10_monitor.py         # Binance 版（备用）
+├── finnhub_monitor.py              # Finnhub 美股监控（备用）
+└── test_*.py                       # 各类 API 测试脚本
+```
+
+---
+
+## 注意事项
+
+1. **Gate.io 合约价格 ≠ 真实股价**：美股代币合约（如 AMD_USDT）存在 **2-4% 的系统性溢价**，但涨跌趋势与真实美股高度一致。
+
+2. **新合约数据不足**：BILL、SOXL、DRAM、CBRS、QCOM 等日K历史数据较少，需等待数据积累。
+
+3. **API 限流**：Gate.io API 有频率限制，脚本已内置 **0.25秒请求间隔**，避免短时间内多次点击刷新。
+
+4. **局域网访问**：Web 面板默认绑定 `0.0.0.0`，同一 WiFi 下可访问；跨网络需公网 IP 或云服务器部署。
+
+---
+
+## 配置推送通知（可选）
+
+编辑 `app.py` 中的 `WECOM_WEBHOOK_URL`：
+
+```python
+WECOM_WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的key"
+```
+
+获取方式：企业微信群 → 添加群机器人 → 复制 Webhook 地址。
+
+---
+
+## 更新日志
+
+| 日期 | 版本 | 内容 |
+|------|------|------|
+| 2026-05-24 | v1.0 | 初始版本：32个标的、3周期 MA10、Web 面板、命令行脚本 |
+| 2026-05-24 | v1.1 | 添加趋势转折预警、企业微信推送、持仓方向标记 |
+| 2026-05-25 | v1.2 | 4小时周期支持、持仓持久化、自动启动浏览器、黑客风格启动画面 |
+
+---
+
+## License
+
+MIT License
