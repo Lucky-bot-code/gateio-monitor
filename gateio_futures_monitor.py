@@ -97,8 +97,10 @@ def check_reversal_strength(iv: Dict) -> Optional[str]:
     """
     判断转折预警是否满足强度条件。
     日K 不预警。只对 4小时/60分钟/15分钟生效。
-    consecutive=1: 当前成交量 >= 上个周期 * 2
-    consecutive=2: 收盘价 > MA10  OR  收盘价 > 上个周期最高价
+
+    consecutive=1: 量能放大2x + (价格>MA10 或 价格>前高)
+    consecutive=2: 价格>MA10 或 价格>前二周期最高价
+    consecutive>=3: 不预警
     """
     if iv["name"] == "日K":
         return None
@@ -108,20 +110,31 @@ def check_reversal_strength(iv: Dict) -> Optional[str]:
     close = iv["close"]
     ma10 = iv["ma10"]
 
+    if cons >= 3:
+        return None
+
     if cons == 1:
         vol = iv.get("volume", 0)
         prev_vol = iv.get("prev_volume", 0)
-        if prev_vol > 0 and vol >= prev_vol * 2:
-            return f"量能放大{vol/prev_vol:.1f}x"
-        return None
-
-    if cons == 2:
+        if not (prev_vol > 0 and vol >= prev_vol * 2):
+            return None
         prev_high = iv.get("prev_high", 0)
         conds = []
         if close is not None and ma10 is not None and close > ma10:
             conds.append("价格>MA10")
         if close is not None and prev_high > 0 and close > prev_high:
             conds.append("价格>前高")
+        if not conds:
+            return None
+        return f"量能放大{vol/prev_vol:.1f}x+" + "+".join(conds)
+
+    if cons == 2:
+        prev2_high = iv.get("prev2_high", 0)
+        conds = []
+        if close is not None and ma10 is not None and close > ma10:
+            conds.append("价格>MA10")
+        if close is not None and prev2_high > 0 and close > prev2_high:
+            conds.append("价格>前二高")
         if conds:
             return "+".join(conds)
         return None
@@ -383,9 +396,11 @@ class GateioFuturesMonitor:
 
                 cur_k = klines_sorted[-1]
                 prev_k = klines_sorted[-2] if len(klines_sorted) >= 2 else None
+                prev2_k = klines_sorted[-3] if len(klines_sorted) >= 3 else None
                 volume = float(cur_k["v"])
                 prev_volume = float(prev_k["v"]) if prev_k else 0
                 prev_high = float(prev_k["h"]) if prev_k else 0
+                prev2_high = float(prev2_k["h"]) if prev2_k else 0
 
                 reversal_pct = None
                 if 1 <= consecutive <= 3 and trend not in ("数据不足", "震荡"):
@@ -403,7 +418,8 @@ class GateioFuturesMonitor:
                     "ma10": round(valid_ma[-1], 4) if valid_ma else None,
                     "volume": round(volume, 2),
                     "prev_volume": round(prev_volume, 2),
-                    "prev_high": round(prev_high, 4)
+                    "prev_high": round(prev_high, 4),
+                    "prev2_high": round(prev2_high, 4)
                 })
             results.append(result)
             self.analyze_symbol(sym_info)

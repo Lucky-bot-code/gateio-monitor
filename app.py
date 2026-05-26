@@ -15,7 +15,7 @@ import logging
 import importlib.metadata
 import webbrowser
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional
 from flask import Flask, jsonify, render_template_string, request
 
@@ -23,9 +23,12 @@ from flask import Flask, jsonify, render_template_string, request
 BASE_URL = "https://api.gateio.ws/api/v4"
 CONFIG_FILE = "gateio_available_symbols.json"
 PORT = 5000
-AUTO_REFRESH_INTERVAL = 300  # 后台自动刷新间隔(秒)
+AUTO_REFRESH_INTERVAL = 300  # 保留作为后备间隔(秒)，实际使用对齐K线收盘的动态调度
 REQUEST_DELAY = 0.25  # API请求间隔
 KLINES_LIMIT = 50
+
+# 下一次自动刷新的启动时间戳（auto_refresh_loop 启动后更新）
+_next_refresh_at = time.time() + AUTO_REFRESH_INTERVAL
 
 app = Flask(__name__)
 
@@ -126,10 +129,9 @@ def check_reversal_strength(iv: Dict) -> Optional[str]:
     判断转折预警是否满足强度条件。
     日K 不预警。只对 4小时/60分钟/15分钟生效。
 
-    consecutive=1: 当前周期成交量 >= 上个周期成交量 * 2
-    consecutive=2: 当前收盘价 > MA10  OR  当前收盘价 > 上个周期最高价
-
-    返回: 条件描述字符串 / None(不满足)
+    consecutive=1: 量能放大2x + (价格>MA10 或 价格>前高)
+    consecutive=2: 价格>MA10 或 价格>前二周期最高价
+    consecutive>=3: 不预警
     """
     if iv["name"] == "日K":
         return None
@@ -139,20 +141,32 @@ def check_reversal_strength(iv: Dict) -> Optional[str]:
     close = iv["close"]
     ma10 = iv["ma10"]
 
-    if cons == 1:
-        vol = iv.get("volume", 0)
-        prev_vol = iv.get("prev_volume", 0)
-        if prev_vol > 0 and vol >= prev_vol * 2:
-            return f"量能放大{vol/prev_vol:.1f}x"
+    if cons >= 3:
         return None
 
-    if cons == 2:
+    if cons == 1:
+        # 量能条件 + 价格条件
+        vol = iv.get("volume", 0)
+        prev_vol = iv.get("prev_volume", 0)
+        if not (prev_vol > 0 and vol >= prev_vol * 2):
+            return None
         prev_high = iv.get("prev_high", 0)
         conds = []
         if close is not None and ma10 is not None and close > ma10:
             conds.append("价格>MA10")
         if close is not None and prev_high > 0 and close > prev_high:
             conds.append("价格>前高")
+        if not conds:
+            return None
+        return f"量能放大{vol/prev_vol:.1f}x+" + "+".join(conds)
+
+    if cons == 2:
+        prev2_high = iv.get("prev2_high", 0)
+        conds = []
+        if close is not None and ma10 is not None and close > ma10:
+            conds.append("价格>MA10")
+        if close is not None and prev2_high > 0 and close > prev2_high:
+            conds.append("价格>前二高")
         if conds:
             return "+".join(conds)
         return None
@@ -417,9 +431,11 @@ class MonitorCore:
                 # 成交量与前高数据（用于转折预警强度判断）
                 cur_k = klines_sorted[-1]
                 prev_k = klines_sorted[-2] if len(klines_sorted) >= 2 else None
+                prev2_k = klines_sorted[-3] if len(klines_sorted) >= 3 else None
                 volume = float(cur_k["v"])
                 prev_volume = float(prev_k["v"]) if prev_k else 0
                 prev_high = float(prev_k["h"]) if prev_k else 0
+                prev2_high = float(prev2_k["h"]) if prev2_k else 0
 
                 # 转折连续周期对应的总涨跌幅（仅在新趋势 1~3 周期时计算）
                 reversal_pct = None
@@ -442,7 +458,8 @@ class MonitorCore:
                     "ma_series": [round(v, 2) for v in recent_ma] if recent_ma else [],
                     "volume": round(volume, 2),
                     "prev_volume": round(prev_volume, 2),
-                    "prev_high": round(prev_high, 4)
+                    "prev_high": round(prev_high, 4),
+                    "prev2_high": round(prev2_high, 4)
                 })
 
             results.append(result)
@@ -580,11 +597,32 @@ def refresh_data():
             threading.Thread(target=delayed_open, daemon=True).start()
 
 
+def _next_refresh_delay() -> float:
+    """计算到下一个对齐15分钟K线收盘的时间(秒)。
+    提前55秒启动刷新(~45s刷新耗时 + ~10s缓冲)，数据在收盘前就绪。"""
+    now = datetime.now()
+    next_boundary = ((now.minute // 15) + 1) * 15
+    target = now.replace(second=0, microsecond=0)
+    if next_boundary >= 60:
+        target = target.replace(minute=0) + timedelta(hours=1)
+    else:
+        target = target.replace(minute=next_boundary)
+    target -= timedelta(seconds=55)
+    delay = (target - now).total_seconds()
+    if delay < 5:
+        delay += 900  # 错过窗口，等下一个15分钟
+    return delay
+
+
 def auto_refresh_loop():
-    """后台自动刷新线程"""
+    """后台自动刷新线程 - 对齐K线收盘时间调度"""
+    global _next_refresh_at
     while True:
-        time.sleep(AUTO_REFRESH_INTERVAL)
+        delay = _next_refresh_delay()
+        _next_refresh_at = time.time() + delay  # 刷新即将开始
+        time.sleep(delay)
         refresh_data()
+        _next_refresh_at = time.time()  # 刷新完成，前端可立即拉取
 
 
 # ============ HTML模板 ============
@@ -940,7 +978,7 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
-        let countdown = 300;
+        let countdownRemaining = 300;
         let countdownTimer;
         let dataCache = null;
         let alertsCache = [];
@@ -1336,6 +1374,7 @@ HTML_TEMPLATE = """
                 renderCards(dataCache, alertsCache);
                 document.getElementById('updateInfo').textContent = '更新于: ' + payload.last_update;
                 document.getElementById('errorBox').style.display = 'none';
+                countdownRemaining = payload.next_refresh_in || 300;
                 // 如果当前在背离页面，同步刷新
                 if (document.getElementById('view-divergence').classList.contains('active')) {
                     renderDivergence(divergenceCache);
@@ -1366,7 +1405,6 @@ HTML_TEMPLATE = """
                         await loadData();
                         btn.disabled = false;
                         btn.textContent = '刷新数据';
-                        countdown = 300;
                     }
                     retries++;
                 }, 1000);
@@ -1378,16 +1416,18 @@ HTML_TEMPLATE = """
         }
 
         function startCountdown() {
-            countdown = 300;
             if (countdownTimer) clearInterval(countdownTimer);
+            let isReloading = false;
+            let lastReloadTime = 0;
             countdownTimer = setInterval(() => {
-                countdown--;
-                const m = Math.floor(countdown / 60);
-                const s = countdown % 60;
-                document.getElementById('countdown').textContent = `下次自动刷新: ${m}:${s.toString().padStart(2, '0')}`;
-                if (countdown <= 0) {
-                    loadData();
-                    countdown = 300;
+                countdownRemaining--;
+                const m = Math.floor(Math.max(0, countdownRemaining) / 60);
+                const s = Math.max(0, countdownRemaining) % 60;
+                document.getElementById('countdown').textContent = `下次刷新: ${m}:${s.toString().padStart(2, '0')}`;
+                if (countdownRemaining <= 0 && !isReloading && Date.now() - lastReloadTime > 15000) {
+                    isReloading = true;
+                    lastReloadTime = Date.now();
+                    loadData().finally(() => { isReloading = false; });
                 }
             }, 1000);
         }
@@ -1416,7 +1456,8 @@ def api_data():
         "error": cache["error"],
         "alerts": cache["alerts"],
         "position_alerts": cache["position_alerts"],
-        "divergence": cache["divergence"]
+        "divergence": cache["divergence"],
+        "next_refresh_in": max(0, _next_refresh_at - time.time())
     })
 
 
