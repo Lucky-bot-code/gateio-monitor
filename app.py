@@ -594,6 +594,7 @@ HTML_TEMPLATE = """
             padding: 10px;
             text-align: center;
             border: 1px solid transparent;
+            overflow: hidden;
         }
         .interval-item .name { font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 4px; }
         .interval-item .trend { font-size: 0.8rem; font-weight: 600; margin-bottom: 2px; }
@@ -1008,16 +1009,17 @@ HTML_TEMPLATE = """
             const mn = Math.min(...vals);
             const mx = Math.max(...vals);
             const range = mx - mn || 1;
-            const w = Math.max(vals.length * 8, 40);
-            const h = 20;
+            const n = vals.length;
+            const vw = n * 10;
+            const vh = 16;
             const pts = vals.map((v, i) => {
-                const x = i * (w / (vals.length - 1));
-                const y = h - 2 - ((v - mn) / range * (h - 4));
-                return `${x},${y.toFixed(1)}`;
+                const x = i * (vw / (n - 1));
+                const y = vh - 1 - ((v - mn) / range * (vh - 2));
+                return `${x.toFixed(1)},${y.toFixed(1)}`;
             });
             const color = trendClass.includes('up') ? '#10b981' : (trendClass.includes('down') ? '#ef4444' : '#6b7280');
-            return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;margin:2px auto 0;overflow:visible">
-                <polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+            return `<svg width="100%" height="${vh}" viewBox="0 0 ${vw} ${vh}" style="display:block;margin:1px auto 0;max-width:100%">
+                <polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1" vector-effect="non-scaling-stroke"/>
             </svg>`;
         }
 
