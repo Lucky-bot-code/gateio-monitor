@@ -108,6 +108,34 @@ def _trend_direction(trend: str) -> str:
     return "neutral"
 
 
+def get_active_alert_intervals() -> set:
+    """
+    返回当前时刻应该执行转折检测的周期集合。
+    规则（北京时间）：
+    - 15分钟：每次刷新都检测
+    - 60分钟：每小时最后15分钟（45-59分）
+    - 4小时：每4小时K线最后15分钟（北京时 3/7/11/15/19/23 点的 45-59 分）
+    - 日K：每日K线最后15分钟（北京时 7:45-8:00，对应 UTC 23:45-00:00）
+    """
+    now = datetime.now()
+    minute = now.minute
+    hour = now.hour
+
+    active = {"15分钟"}
+
+    if 45 <= minute < 60:
+        active.add("60分钟")
+        # 4小时: UTC 收盘 0/4/8/12/16/20 → 北京时 8/12/16/20/0/4
+        # 最后一个15分钟是北京时 7/11/15/19/23/3 点的 45-59 分 → hour % 4 == 3
+        if hour % 4 == 3:
+            active.add("4小时")
+        # 日K: UTC 0:00 收盘 → 北京时 8:00，最后一刻在北京时 7:45-7:59
+        if hour == 7:
+            active.add("日K")
+
+    return active
+
+
 def detect_reversal(prev_trend: str, curr_trend: str, curr_consecutive: int) -> Optional[str]:
     """
     检测趋势转折。
@@ -124,17 +152,17 @@ def detect_reversal(prev_trend: str, curr_trend: str, curr_consecutive: int) -> 
     return None
 
 
-def check_reversal_strength(iv: Dict) -> Optional[str]:
+def check_reversal_strength(iv: Dict, rev: str) -> Optional[str]:
     """
-    判断转折预警是否满足强度条件。
-    日K 不预警。只对 4小时/60分钟/15分钟生效。
+    判断转折预警是否满足强度条件。所有周期通用。
 
-    consecutive=1: 量能放大2x + (价格>MA10 或 价格>前高)
-    consecutive=2: 价格>MA10 或 价格>前二周期最高价
+    rev = 'reversal_up' (下跌转上涨): 价格需要向上突破
+    rev = 'reversal_down' (上涨转下跌): 价格需要向下突破
+
+    consecutive=1: 量能放大2x + 方向价格条件
+    consecutive=2: 方向价格条件
     consecutive>=3: 不预警
     """
-    if iv["name"] == "日K":
-        return None
     if iv.get("trend") in ("数据不足", "震荡") or iv["consecutive"] < 1:
         return None
     cons = iv["consecutive"]
@@ -144,29 +172,46 @@ def check_reversal_strength(iv: Dict) -> Optional[str]:
     if cons >= 3:
         return None
 
+    is_up = (rev == "reversal_up")
+
     if cons == 1:
-        # 量能条件 + 价格条件
+        # 量能条件
         vol = iv.get("volume", 0)
         prev_vol = iv.get("prev_volume", 0)
         if not (prev_vol > 0 and vol >= prev_vol * 2):
             return None
-        prev_high = iv.get("prev_high", 0)
+        # 方向价格条件
         conds = []
-        if close is not None and ma10 is not None and close > ma10:
-            conds.append("价格>MA10")
-        if close is not None and prev_high > 0 and close > prev_high:
-            conds.append("价格>前高")
+        if is_up:
+            prev_high = iv.get("prev_high", 0)
+            if close is not None and ma10 is not None and close > ma10:
+                conds.append("价格>MA10")
+            if close is not None and prev_high > 0 and close > prev_high:
+                conds.append("价格>前高")
+        else:
+            prev_low = iv.get("prev_low", float("inf"))
+            if close is not None and ma10 is not None and close < ma10:
+                conds.append("价格<MA10")
+            if close is not None and prev_low != float("inf") and close < prev_low:
+                conds.append("价格<前低")
         if not conds:
             return None
         return f"量能放大{vol/prev_vol:.1f}x+" + "+".join(conds)
 
     if cons == 2:
-        prev2_high = iv.get("prev2_high", 0)
         conds = []
-        if close is not None and ma10 is not None and close > ma10:
-            conds.append("价格>MA10")
-        if close is not None and prev2_high > 0 and close > prev2_high:
-            conds.append("价格>前二高")
+        if is_up:
+            prev2_high = iv.get("prev2_high", 0)
+            if close is not None and ma10 is not None and close > ma10:
+                conds.append("价格>MA10")
+            if close is not None and prev2_high > 0 and close > prev2_high:
+                conds.append("价格>前二高")
+        else:
+            prev2_low = iv.get("prev2_low", float("inf"))
+            if close is not None and ma10 is not None and close < ma10:
+                conds.append("价格<MA10")
+            if close is not None and prev2_low != float("inf") and close < prev2_low:
+                conds.append("价格<前二低")
         if conds:
             return "+".join(conds)
         return None
@@ -222,22 +267,51 @@ def analyze_divergence(data: List[Dict]) -> List[Dict]:
 
 
 def build_alert_state(data: List[Dict]) -> Dict:
-    """将数据转换为可序列化的状态字典，用于跨运行比较"""
-    state = {}
+    """
+    将数据转换为 interval-first 状态字典。
+    结构: {周期名: {symbol: {trend, consecutive}}}
+    每个周期独立保存，以便各周期按各自边界时间对比。
+    """
+    state: Dict[str, Dict] = {"日K": {}, "4小时": {}, "60分钟": {}, "15分钟": {}}
     for item in data:
         sym = item["symbol"]
-        state[sym] = {iv["name"]: {"trend": iv["trend"], "consecutive": iv["consecutive"]} for iv in item.get("intervals", [])}
+        for iv in item.get("intervals", []):
+            name = iv["name"]
+            if name in state:
+                state[name][sym] = {"trend": iv["trend"], "consecutive": iv["consecutive"]}
     return state
 
 
-def load_prev_state() -> Optional[Dict]:
-    if os.path.exists(ALERT_STATE_FILE):
-        try:
-            with open(ALERT_STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return None
+def load_prev_state() -> Dict[str, Dict]:
+    """
+    加载上次保存的状态。兼容旧 symbol-first 格式，自动转换为 interval-first。
+    """
+    empty: Dict[str, Dict] = {"日K": {}, "4小时": {}, "60分钟": {}, "15分钟": {}}
+    if not os.path.exists(ALERT_STATE_FILE):
+        return empty
+    try:
+        with open(ALERT_STATE_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        return empty
+    if not raw:
+        return empty
+    # 检测格式：新 interval-first 格式的 key 是周期名
+    first_key = next(iter(raw))
+    if first_key in ("日K", "4小时", "60分钟", "15分钟"):
+        # 新格式，确保所有键存在
+        for k in empty:
+            if k not in raw:
+                raw[k] = {}
+        return raw
+    # 旧 symbol-first 格式，转换
+    converted: Dict[str, Dict] = {"日K": {}, "4小时": {}, "60分钟": {}, "15分钟": {}}
+    for sym, intervals in raw.items():
+        if isinstance(intervals, dict):
+            for iv_name, iv_data in intervals.items():
+                if iv_name in converted:
+                    converted[iv_name][sym] = iv_data
+    return converted
 
 
 def save_state(state: Dict):
@@ -272,7 +346,7 @@ def print_banner():
    +=======================================================+
    |                                                       |
    |     G A T E . I O   M A 1 0   M O N I T O R         |
-   |              Protocol v1.3  //  ONLINE                |
+   |              Protocol v1.3.1  //  ONLINE                |
    |                                                       |
    +=======================================================+
 """)
@@ -442,6 +516,8 @@ class MonitorCore:
                 prev_volume = float(prev_k["v"]) if prev_k else 0
                 prev_high = float(prev_k["h"]) if prev_k else 0
                 prev2_high = float(prev2_k["h"]) if prev2_k else 0
+                prev_low = float(prev_k["l"]) if prev_k else float("inf")
+                prev2_low = float(prev2_k["l"]) if prev2_k else float("inf")
 
                 # 转折连续周期对应的总涨跌幅（仅在新趋势 1~3 周期时计算）
                 reversal_pct = None
@@ -465,7 +541,9 @@ class MonitorCore:
                     "volume": round(volume, 2),
                     "prev_volume": round(prev_volume, 2),
                     "prev_high": round(prev_high, 4),
-                    "prev2_high": round(prev2_high, 4)
+                    "prev2_high": round(prev2_high, 4),
+                    "prev_low": round(prev_low, 4) if prev_low != float("inf") else float("inf"),
+                    "prev2_low": round(prev2_low, 4) if prev2_low != float("inf") else float("inf")
                 })
 
             results.append(result)
@@ -491,73 +569,84 @@ def refresh_data():
         data = monitor.analyze_all()
         prev_state = load_prev_state()
         new_state = build_alert_state(data)
+        active_intervals = get_active_alert_intervals()
         alerts = []
 
-        if prev_state:
+        # 转折预警：仅对当前时刻活跃的周期检测
+        for iv_name in active_intervals:
+            prev_iv_state = prev_state.get(iv_name, {})
+            new_iv_state = new_state.get(iv_name, {})
+            if not prev_iv_state:
+                continue
             for item in data:
                 sym = item["symbol"]
-                if sym not in prev_state:
+                if sym not in prev_iv_state or sym not in new_iv_state:
                     continue
-                prev_sym = prev_state[sym]
-                for iv in item["intervals"]:
-                    iv_name = iv["name"]
-                    if iv_name not in prev_sym:
-                        continue
-                    prev_iv = prev_sym[iv_name]
-                    rev = detect_reversal(prev_iv["trend"], iv["trend"], iv["consecutive"])
-                    if rev:
-                        cond = check_reversal_strength(iv)
-                        if not cond:
-                            continue
-                        alerts.append({
-                            "symbol": sym,
-                            "interval": iv_name,
-                            "type": rev,
-                            "prev_trend": prev_iv["trend"],
-                            "curr_trend": iv["trend"],
-                            "consecutive": iv["consecutive"],
-                            "reversal_pct": iv.get("reversal_pct"),
-                            "condition": cond
-                        })
+                prev_iv = prev_iv_state[sym]
+                new_iv = new_iv_state[sym]
+                rev = detect_reversal(prev_iv["trend"], new_iv["trend"], new_iv["consecutive"])
+                if not rev:
+                    continue
+                iv_data = next((iv for iv in item["intervals"] if iv["name"] == iv_name), None)
+                if not iv_data:
+                    continue
+                cond = check_reversal_strength(iv_data, rev)
+                if not cond:
+                    continue
+                alerts.append({
+                    "symbol": sym,
+                    "interval": iv_name,
+                    "type": rev,
+                    "prev_trend": prev_iv["trend"],
+                    "curr_trend": new_iv["trend"],
+                    "consecutive": new_iv["consecutive"],
+                    "reversal_pct": iv_data.get("reversal_pct"),
+                    "condition": cond
+                })
 
         cache["data"] = data
         cache["alerts"] = alerts
 
-        # 持仓预警：对标记了多/空的标的检测不利转折
+        # 持仓预警：同样仅对活跃周期检测
         position_alerts = []
-        if prev_state:
+        for iv_name in active_intervals:
+            prev_iv_state = prev_state.get(iv_name, {})
+            new_iv_state = new_state.get(iv_name, {})
+            if not prev_iv_state:
+                continue
             for item in data:
                 sym = item["symbol"]
                 pos = user_positions.get(sym)
                 if not pos:
                     continue
-                if sym not in prev_state:
+                if sym not in prev_iv_state or sym not in new_iv_state:
                     continue
-                prev_sym = prev_state[sym]
-                for iv in item["intervals"]:
-                    iv_name = iv["name"]
-                    if iv_name not in prev_sym:
-                        continue
-                    prev_iv = prev_sym[iv_name]
-                    rev = detect_reversal(prev_iv["trend"], iv["trend"], iv["consecutive"])
-                    if rev:
-                        # 多→下跌转折预警 空→上涨转折预警
-                        if (pos == "long" and rev == "reversal_down") or (pos == "short" and rev == "reversal_up"):
-                            position_alerts.append({
-                                "symbol": sym,
-                                "interval": iv_name,
-                                "type": rev,
-                                "position": pos,
-                                "prev_trend": prev_iv["trend"],
-                                "curr_trend": iv["trend"],
-                                "consecutive": iv["consecutive"],
-                                "reversal_pct": iv.get("reversal_pct")
-                            })
+                prev_iv = prev_iv_state[sym]
+                new_iv = new_iv_state[sym]
+                rev = detect_reversal(prev_iv["trend"], new_iv["trend"], new_iv["consecutive"])
+                if rev:
+                    if (pos == "long" and rev == "reversal_down") or (pos == "short" and rev == "reversal_up"):
+                        iv_data = next((iv for iv in item["intervals"] if iv["name"] == iv_name), None)
+                        position_alerts.append({
+                            "symbol": sym,
+                            "interval": iv_name,
+                            "type": rev,
+                            "position": pos,
+                            "prev_trend": prev_iv["trend"],
+                            "curr_trend": new_iv["trend"],
+                            "consecutive": new_iv["consecutive"],
+                            "reversal_pct": iv_data.get("reversal_pct") if iv_data else None
+                        })
 
         cache["position_alerts"] = position_alerts
         cache["divergence"] = analyze_divergence(data)
         cache["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        save_state(new_state)
+        # 只更新活跃周期的状态，未活跃周期保留旧值
+        merged_state = dict(prev_state)
+        for iv_name in active_intervals:
+            if iv_name in new_state:
+                merged_state[iv_name] = new_state[iv_name]
+        save_state(merged_state)
 
         if alerts:
             print(f"\n{'='*60}")

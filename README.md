@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-2.0%2B-green)](https://flask.palletsprojects.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-v1.3-orange)](.)
+[![Version](https://img.shields.io/badge/Version-v1.3.1-orange)](.)
 
 ---
 
@@ -13,7 +13,7 @@
 
 - **四周期监控**：日K、4小时、60分钟、15分钟四个时间周期的 MA10 趋势方向
 - **自动筛选标的**：不可用的合约自动剔除，只监控有效标的
-- **趋势转折预警**：MA10 从连续上涨转为连续下跌（或相反）时自动检测，含强度条件过滤（量能放大、价格突破）
+- **趋势转折预警**：MA10 从连续上涨转为连续下跌（或相反）时自动检测，含强度条件过滤（量能放大、价格突破/跌破）；按周期边界调度（日K每日1次/4H每4h/1H每小时/15m每15m），避免噪音
 - **多周期背离信号**：大周期连续 ≥5 同向 + 小周期反向 → 买入/卖出信号，三层检测（日K↔4h↔1h↔15m）
 - **企业微信推送**：支持通过企业微信机器人推送转折预警
 - **持仓方向标记**：Web 面板可标记多/空/无三态持仓，数据持久化保存
@@ -225,6 +225,7 @@ WECOM_WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的
 
 | 日期 | 版本 | 内容 |
 |------|------|------|
+| 2026-05-26 | v1.3.1 | 转折预警按周期边界调度（日K每日一次/4H每4h/1H每小时/15m每15m）、状态存储改为 interval-first 结构、日K 预警解禁 |
 | 2026-05-26 | v1.3 | 多周期背离信号（三层检测）、K线对齐自动刷新、转折预警强度条件过滤、▓/▒ 进度条美化 |
 | 2026-05-25 | v1.2 | 4小时周期支持、持仓方向标记持久化、自动启动浏览器、黑客风格启动画面、端口自动清理 |
 | 2026-05-24 | v1.1 | 趋势转折预警、企业微信推送、预警强度条件 |
