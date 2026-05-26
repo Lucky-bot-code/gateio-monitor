@@ -291,10 +291,16 @@ def print_progress(current: int, total: int, symbol: str = ""):
     """在同一行打印进度条"""
     bar_len = 30
     filled = int(bar_len * current // total)
-    bar = "#" * filled + "." * (bar_len - filled)
+    bar = "▓" * filled + "▒" * (bar_len - filled)
     pct = int(100 * current / total)
     sym = f" | {symbol:<8}" if symbol else ""
-    print(f"\r[PROG] [{bar}] {pct:>3}%{sym}", end="", flush=True)
+    line = f"\r[PROG] [{bar}] {pct:>3}%{sym}"
+    try:
+        print(line, end="", flush=True)
+    except UnicodeEncodeError:
+        bar2 = "#" * filled + "." * (bar_len - filled)
+        line2 = f"\r[PROG] [{bar2}] {pct:>3}%{sym}"
+        print(line2, end="", flush=True)
     if current >= total:
         print()
 
