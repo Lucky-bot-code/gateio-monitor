@@ -27,28 +27,40 @@ INTERVALS = {
 KLINES_LIMIT = 50  # 取50根K线
 REQUEST_DELAY = 0.3  # 请求间隔(秒)，防限流
 STATE_FILE = ".monitor_state.json"
+POSITIONS_FILE = "positions.json"
 
 # 微信通知配置（企业微信机器人 Webhook）
 WECOM_WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=7bef2a11-7838-4859-a9c0-b65b6cf2dc36"
 
 
-def send_wecom_alert(alerts: List[Dict], update_time: str) -> bool:
+def send_wecom_alert(alerts: List[Dict], update_time: str, alert_type: str = "reversal") -> bool:
     """
     通过企业微信机器人推送预警消息。
-    如果 WECOM_WEBHOOK_URL 为空则跳过。
+    alert_type: "reversal" 转折预警 / "position" 持仓预警
     """
     if not WECOM_WEBHOOK_URL or not alerts:
         return False
-    lines = [f"**MA10 转折预警**  \n更新时间: {update_time}  \n"]
+    title = "MA10 转折预警" if alert_type == "reversal" else "持仓预警"
+    lines = [f"**{title}**  \n更新时间: {update_time}  \n"]
     for a in alerts:
         arrow = "📉" if a["type"] == "reversal_down" else "📈"
         text = "下跌转折" if a["type"] == "reversal_down" else "上涨转折"
         pct = f" 累计{a['reversal_pct']:+.2f}%" if a.get("reversal_pct") is not None else ""
-        lines.append(
-            f"{arrow} **{a['symbol']}** {a['interval']}{text} "
-            f"(已{a['consecutive']}周期){pct}  \n"
-            f"> 前: {a['prev_trend']} → 现: {a['curr_trend']}  \n"
-        )
+        if alert_type == "position":
+            pos_label = "做多" if a["position"] == "long" else "做空"
+            lines.append(
+                f"{arrow} **{a['symbol']}** {a['interval']}{text}"
+                f"(已{a['consecutive']}周期·{pos_label}){pct}  \n"
+                f"> 前: {a['prev_trend']} → 现: {a['curr_trend']}  \n"
+            )
+        else:
+            cond = a.get("condition", "")
+            cond_str = f"  [{cond}]" if cond else ""
+            lines.append(
+                f"{arrow} **{a['symbol']}** {a['interval']}{text}"
+                f"(已{a['consecutive']}周期){pct}{cond_str}  \n"
+                f"> 前: {a['prev_trend']} → 现: {a['curr_trend']}  \n"
+            )
     payload = {
         "msgtype": "markdown",
         "markdown": {"content": "\n".join(lines)}
@@ -133,6 +145,16 @@ def save_state(state: Dict):
             json.dump(state, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"  警告: 无法保存状态文件: {e}")
+
+
+def load_positions() -> Dict:
+    if os.path.exists(POSITIONS_FILE):
+        try:
+            with open(POSITIONS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
 
 
 def build_state(results: List[Dict]) -> Dict:
@@ -435,6 +457,52 @@ class GateioFuturesMonitor:
             if ok:
                 print("  微信通知已发送")
             print("=" * 70)
+
+        # 持仓预警
+        positions = load_positions()
+        position_alerts = []
+        if prev_state and positions:
+            for item in results:
+                sym = item["symbol"]
+                pos = positions.get(sym)
+                if not pos:
+                    continue
+                if sym not in prev_state:
+                    continue
+                prev_sym = prev_state[sym]
+                for iv in item["intervals"]:
+                    iv_name = iv["name"]
+                    if iv_name not in prev_sym:
+                        continue
+                    prev_iv = prev_sym[iv_name]
+                    rev = detect_reversal(prev_iv["trend"], iv["trend"], iv["consecutive"])
+                    if rev:
+                        if (pos == "long" and rev == "reversal_down") or (pos == "short" and rev == "reversal_up"):
+                            position_alerts.append({
+                                "symbol": sym,
+                                "interval": iv_name,
+                                "type": rev,
+                                "position": pos,
+                                "prev_trend": prev_iv["trend"],
+                                "curr_trend": iv["trend"],
+                                "consecutive": iv["consecutive"],
+                                "reversal_pct": iv.get("reversal_pct")
+                            })
+
+        if position_alerts:
+            print("\n" + "=" * 70)
+            print("  持仓预警")
+            print("=" * 70)
+            for a in position_alerts:
+                pos_label = "做多" if a["position"] == "long" else "做空"
+                arrow = "↓ 下跌转折" if a["type"] == "reversal_down" else "↑ 上涨转折"
+                pct = a.get("reversal_pct")
+                pct_str = f" 累计{a['reversal_pct']:+.2f}%" if pct is not None else ""
+                print(f"  [{a['symbol']}] {a['interval']} {arrow} ({pos_label}){pct_str}")
+                print(f"     前: {a['prev_trend']} → 现: {a['curr_trend']}")
+            print("=" * 70)
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            send_wecom_alert(position_alerts, now_str, alert_type="position")
 
         # 多周期背离检测
         divergence_signals = []

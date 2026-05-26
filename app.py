@@ -36,6 +36,7 @@ cache = {
     "updating": False,
     "error": None,
     "alerts": [],
+    "position_alerts": [],
     "divergence": []
 }
 
@@ -53,25 +54,37 @@ POSITIONS_FILE = "positions.json"
 WECOM_WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=7bef2a11-7838-4859-a9c0-b65b6cf2dc36"
 
 
-def send_wecom_alert(alerts: List[Dict], update_time: str) -> bool:
+def send_wecom_alert(alerts: List[Dict], update_time: str, alert_type: str = "reversal") -> bool:
     """
     通过企业微信机器人推送预警消息。
-    如果 WECOM_WEBHOOK_URL 为空则跳过。
+    alert_type: "reversal" 转折预警 / "position" 持仓预警
     """
     if not WECOM_WEBHOOK_URL or not alerts:
         return False
-    lines = [f"**MA10 转折预警**  \n更新时间: {update_time}  \n"]
+    if alert_type == "reversal":
+        title = "MA10 转折预警"
+    else:
+        title = "持仓预警"
+    lines = [f"**{title}**  \n更新时间: {update_time}  \n"]
     for a in alerts:
         arrow = "📉" if a["type"] == "reversal_down" else "📈"
         text = "下跌转折" if a["type"] == "reversal_down" else "上涨转折"
         pct = f" 累计{a['reversal_pct']:+.2f}%" if a.get("reversal_pct") is not None else ""
-        cond = a.get("condition", "")
-        cond_str = f"  [{cond}]" if cond else ""
-        lines.append(
-            f"{arrow} **{a['symbol']}** {a['interval']}{text}"
-            f"(已{a['consecutive']}周期){pct}{cond_str}  \n"
-            f"> 前: {a['prev_trend']} → 现: {a['curr_trend']}  \n"
-        )
+        if alert_type == "position":
+            pos_label = "做多" if a["position"] == "long" else "做空"
+            lines.append(
+                f"{arrow} **{a['symbol']}** {a['interval']}{text}"
+                f"(已{a['consecutive']}周期·{pos_label}){pct}  \n"
+                f"> 前: {a['prev_trend']} → 现: {a['curr_trend']}  \n"
+            )
+        else:
+            cond = a.get("condition", "")
+            cond_str = f"  [{cond}]" if cond else ""
+            lines.append(
+                f"{arrow} **{a['symbol']}** {a['interval']}{text}"
+                f"(已{a['consecutive']}周期){pct}{cond_str}  \n"
+                f"> 前: {a['prev_trend']} → 现: {a['curr_trend']}  \n"
+            )
     payload = {
         "msgtype": "markdown",
         "markdown": {"content": "\n".join(lines)}
@@ -486,6 +499,39 @@ def refresh_data():
 
         cache["data"] = data
         cache["alerts"] = alerts
+
+        # 持仓预警：对标记了多/空的标的检测不利转折
+        position_alerts = []
+        if prev_state:
+            for item in data:
+                sym = item["symbol"]
+                pos = user_positions.get(sym)
+                if not pos:
+                    continue
+                if sym not in prev_state:
+                    continue
+                prev_sym = prev_state[sym]
+                for iv in item["intervals"]:
+                    iv_name = iv["name"]
+                    if iv_name not in prev_sym:
+                        continue
+                    prev_iv = prev_sym[iv_name]
+                    rev = detect_reversal(prev_iv["trend"], iv["trend"], iv["consecutive"])
+                    if rev:
+                        # 多→下跌转折预警 空→上涨转折预警
+                        if (pos == "long" and rev == "reversal_down") or (pos == "short" and rev == "reversal_up"):
+                            position_alerts.append({
+                                "symbol": sym,
+                                "interval": iv_name,
+                                "type": rev,
+                                "position": pos,
+                                "prev_trend": prev_iv["trend"],
+                                "curr_trend": iv["trend"],
+                                "consecutive": iv["consecutive"],
+                                "reversal_pct": iv.get("reversal_pct")
+                            })
+
+        cache["position_alerts"] = position_alerts
         cache["divergence"] = analyze_divergence(data)
         cache["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         save_state(new_state)
@@ -504,9 +550,21 @@ def refresh_data():
                 print(f"     前趋势: {a['prev_trend']} → 现趋势: {a['curr_trend']}")
             print(f"{'='*60}\n")
             # 推送微信通知
-            ok = send_wecom_alert(alerts, cache["last_update"])
-            if ok:
-                print("  微信通知已发送\n")
+            send_wecom_alert(alerts, cache["last_update"])
+
+        if position_alerts:
+            print(f"\n{'='*60}")
+            print(f"  检测到 {len(position_alerts)} 个持仓预警")
+            print(f"{'='*60}")
+            for a in position_alerts:
+                pos_label = "做多" if a["position"] == "long" else "做空"
+                arrow = "↓ 下跌转折" if a["type"] == "reversal_down" else "↑ 上涨转折"
+                pct = a.get("reversal_pct")
+                pct_str = f" 累计{a['reversal_pct']:+.2f}%" if pct is not None else ""
+                print(f"  [{a['symbol']}] {a['interval']} {arrow} ({pos_label}){pct_str}")
+                print(f"     前趋势: {a['prev_trend']} → 现趋势: {a['curr_trend']}")
+            print(f"{'='*60}\n")
+            send_wecom_alert(position_alerts, cache["last_update"], alert_type="position")
     except Exception as e:
         cache["error"] = str(e)
     finally:
@@ -851,6 +909,11 @@ HTML_TEMPLATE = """
         <div id="alertList" style="display:flex; gap:8px; flex-wrap:wrap;"></div>
     </div>
 
+    <div class="alert-bar" id="posAlertBar">
+        <div style="font-weight:600; font-size:0.8rem; margin-right:8px; color:var(--accent);">持仓预警:</div>
+        <div id="posAlertList" style="display:flex; gap:8px; flex-wrap:wrap;"></div>
+    </div>
+
     <div class="container">
         <div id="loading" class="loading">
             <div class="spinner"></div>
@@ -899,6 +962,7 @@ HTML_TEMPLATE = """
         }
 
         let divergenceCache = null;
+        let positionAlertsCache = [];
 
         async function loadDivergence() {
             const loading = document.getElementById('divergenceLoading');
@@ -1230,6 +1294,27 @@ HTML_TEMPLATE = """
                 alertBar.classList.remove('active');
                 alertList.innerHTML = '';
             }
+
+            // 持仓预警栏
+            const posAlertBar = document.getElementById('posAlertBar');
+            const posAlertList = document.getElementById('posAlertList');
+            const posAlerts = positionAlertsCache || [];
+            if (posAlerts.length > 0) {
+                let html = '';
+                posAlerts.forEach(a => {
+                    const cls = a.type === 'reversal_up' ? 'up' : 'down';
+                    const arrow = a.type === 'reversal_up' ? '↑' : '↓';
+                    const text = a.type === 'reversal_up' ? '上涨转折' : '下跌转折';
+                    const posLabel = a.position === 'long' ? '多' : '空';
+                    const pct = a.reversal_pct !== null && a.reversal_pct !== undefined ? ` ${a.reversal_pct > 0 ? '+' : ''}${a.reversal_pct}%` : '';
+                    html += `<span class="alert-badge ${cls}" onclick="scrollToCard('${a.symbol}')" title="持仓${posLabel} ${a.symbol} ${a.interval}${text}">${arrow} ${a.symbol} ${a.interval}${text} (${posLabel})${pct}</span>`;
+                });
+                posAlertList.innerHTML = html;
+                posAlertBar.classList.add('active');
+            } else {
+                posAlertBar.classList.remove('active');
+                posAlertList.innerHTML = '';
+            }
         }
 
         async function loadData() {
@@ -1247,6 +1332,7 @@ HTML_TEMPLATE = """
                 dataCache = payload.data;
                 alertsCache = payload.alerts || [];
                 divergenceCache = payload.divergence || [];
+                positionAlertsCache = payload.position_alerts || [];
                 renderCards(dataCache, alertsCache);
                 document.getElementById('updateInfo').textContent = '更新于: ' + payload.last_update;
                 document.getElementById('errorBox').style.display = 'none';
@@ -1329,6 +1415,7 @@ def api_data():
         "updating": cache["updating"],
         "error": cache["error"],
         "alerts": cache["alerts"],
+        "position_alerts": cache["position_alerts"],
         "divergence": cache["divergence"]
     })
 
