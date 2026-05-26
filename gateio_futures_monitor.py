@@ -81,6 +81,42 @@ def detect_reversal(prev_trend: str, curr_trend: str, curr_consecutive: int) -> 
     return None
 
 
+def check_reversal_strength(iv: Dict) -> Optional[str]:
+    """
+    判断转折预警是否满足强度条件。
+    日K 不预警。只对 4小时/60分钟/15分钟生效。
+    consecutive=1: 当前成交量 >= 上个周期 * 2
+    consecutive=2: 收盘价 > MA10  OR  收盘价 > 上个周期最高价
+    """
+    if iv["name"] == "日K":
+        return None
+    if iv.get("trend") in ("数据不足", "震荡") or iv["consecutive"] < 1:
+        return None
+    cons = iv["consecutive"]
+    close = iv["close"]
+    ma10 = iv["ma10"]
+
+    if cons == 1:
+        vol = iv.get("volume", 0)
+        prev_vol = iv.get("prev_volume", 0)
+        if prev_vol > 0 and vol >= prev_vol * 2:
+            return f"量能放大{vol/prev_vol:.1f}x"
+        return None
+
+    if cons == 2:
+        prev_high = iv.get("prev_high", 0)
+        conds = []
+        if close is not None and ma10 is not None and close > ma10:
+            conds.append("价格>MA10")
+        if close is not None and prev_high > 0 and close > prev_high:
+            conds.append("价格>前高")
+        if conds:
+            return "+".join(conds)
+        return None
+
+    return None
+
+
 def load_state() -> Optional[Dict]:
     if os.path.exists(STATE_FILE):
         try:
@@ -320,7 +356,14 @@ class GateioFuturesMonitor:
                 klines_sorted = sorted(klines, key=lambda x: int(x["t"]))
                 closes = [float(k["c"]) for k in klines_sorted]
                 ma10 = self.calculate_ma(closes, period=10)
+                valid_ma = [v for v in ma10 if v is not None]
                 trend, consecutive, _ = self.analyze_ma_trend(ma10, min_consecutive=3)
+
+                cur_k = klines_sorted[-1]
+                prev_k = klines_sorted[-2] if len(klines_sorted) >= 2 else None
+                volume = float(cur_k["v"])
+                prev_volume = float(prev_k["v"]) if prev_k else 0
+                prev_high = float(prev_k["h"]) if prev_k else 0
 
                 reversal_pct = None
                 if 1 <= consecutive <= 3 and trend not in ("数据不足", "震荡"):
@@ -333,7 +376,12 @@ class GateioFuturesMonitor:
                     "name": interval_name,
                     "trend": trend,
                     "consecutive": consecutive,
-                    "reversal_pct": round(reversal_pct, 2) if reversal_pct is not None else None
+                    "reversal_pct": round(reversal_pct, 2) if reversal_pct is not None else None,
+                    "close": round(closes[-1], 4),
+                    "ma10": round(valid_ma[-1], 4) if valid_ma else None,
+                    "volume": round(volume, 2),
+                    "prev_volume": round(prev_volume, 2),
+                    "prev_high": round(prev_high, 4)
                 })
             results.append(result)
             self.analyze_symbol(sym_info)
@@ -354,6 +402,9 @@ class GateioFuturesMonitor:
                     prev_iv = prev_sym[iv_name]
                     rev = detect_reversal(prev_iv["trend"], iv["trend"], iv["consecutive"])
                     if rev:
+                        cond = check_reversal_strength(iv)
+                        if not cond:
+                            continue
                         alerts.append({
                             "symbol": sym,
                             "interval": iv_name,
@@ -361,7 +412,8 @@ class GateioFuturesMonitor:
                             "prev_trend": prev_iv["trend"],
                             "curr_trend": iv["trend"],
                             "consecutive": iv["consecutive"],
-                            "reversal_pct": iv.get("reversal_pct")
+                            "reversal_pct": iv.get("reversal_pct"),
+                            "condition": cond
                         })
 
         if alerts:
@@ -372,7 +424,9 @@ class GateioFuturesMonitor:
                 arrow = "↓ 下跌转折" if a["type"] == "reversal_down" else "↑ 上涨转折"
                 pct = a.get("reversal_pct")
                 pct_str = f" 累计{a['reversal_pct']:+.2f}%" if pct is not None else ""
-                print(f"  [{a['symbol']}] {a['interval']} {arrow} (已{a['consecutive']}周期){pct_str}")
+                cond = a.get("condition", "")
+                cond_str = f" [{cond}]" if cond else ""
+                print(f"  [{a['symbol']}] {a['interval']} {arrow} (已{a['consecutive']}周期){pct_str}{cond_str}")
                 print(f"     前: {a['prev_trend']} → 现: {a['curr_trend']}")
             print("=" * 70)
             # 推送微信通知

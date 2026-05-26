@@ -65,9 +65,11 @@ def send_wecom_alert(alerts: List[Dict], update_time: str) -> bool:
         arrow = "📉" if a["type"] == "reversal_down" else "📈"
         text = "下跌转折" if a["type"] == "reversal_down" else "上涨转折"
         pct = f" 累计{a['reversal_pct']:+.2f}%" if a.get("reversal_pct") is not None else ""
+        cond = a.get("condition", "")
+        cond_str = f"  [{cond}]" if cond else ""
         lines.append(
-            f"{arrow} **{a['symbol']}** {a['interval']}{text} "
-            f"(已{a['consecutive']}周期){pct}  \n"
+            f"{arrow} **{a['symbol']}** {a['interval']}{text}"
+            f"(已{a['consecutive']}周期){pct}{cond_str}  \n"
             f"> 前: {a['prev_trend']} → 现: {a['curr_trend']}  \n"
         )
     payload = {
@@ -94,7 +96,6 @@ def detect_reversal(prev_trend: str, curr_trend: str, curr_consecutive: int) -> 
     """
     检测趋势转折。
     返回: 'reversal_up' (下跌转上涨) / 'reversal_down' (上涨转下跌) / None
-    条件: 新趋势方向改变，且已连续 >= 2 个周期
     """
     if curr_consecutive < 1 or curr_consecutive > 3:
         return None
@@ -104,6 +105,45 @@ def detect_reversal(prev_trend: str, curr_trend: str, curr_consecutive: int) -> 
         return "reversal_down"
     if prev_dir == "down" and curr_dir == "up":
         return "reversal_up"
+    return None
+
+
+def check_reversal_strength(iv: Dict) -> Optional[str]:
+    """
+    判断转折预警是否满足强度条件。
+    日K 不预警。只对 4小时/60分钟/15分钟生效。
+
+    consecutive=1: 当前周期成交量 >= 上个周期成交量 * 2
+    consecutive=2: 当前收盘价 > MA10  OR  当前收盘价 > 上个周期最高价
+
+    返回: 条件描述字符串 / None(不满足)
+    """
+    if iv["name"] == "日K":
+        return None
+    if iv.get("trend") in ("数据不足", "震荡") or iv["consecutive"] < 1:
+        return None
+    cons = iv["consecutive"]
+    close = iv["close"]
+    ma10 = iv["ma10"]
+
+    if cons == 1:
+        vol = iv.get("volume", 0)
+        prev_vol = iv.get("prev_volume", 0)
+        if prev_vol > 0 and vol >= prev_vol * 2:
+            return f"量能放大{vol/prev_vol:.1f}x"
+        return None
+
+    if cons == 2:
+        prev_high = iv.get("prev_high", 0)
+        conds = []
+        if close is not None and ma10 is not None and close > ma10:
+            conds.append("价格>MA10")
+        if close is not None and prev_high > 0 and close > prev_high:
+            conds.append("价格>前高")
+        if conds:
+            return "+".join(conds)
+        return None
+
     return None
 
 
@@ -361,6 +401,13 @@ class MonitorCore:
                 trend, consecutive, recent_ma = self.analyze_trend(ma10, min_consecutive=3)
                 deviation = (closes[-1] - valid_ma[-1]) / valid_ma[-1] * 100 if valid_ma else 0
 
+                # 成交量与前高数据（用于转折预警强度判断）
+                cur_k = klines_sorted[-1]
+                prev_k = klines_sorted[-2] if len(klines_sorted) >= 2 else None
+                volume = float(cur_k["v"])
+                prev_volume = float(prev_k["v"]) if prev_k else 0
+                prev_high = float(prev_k["h"]) if prev_k else 0
+
                 # 转折连续周期对应的总涨跌幅（仅在新趋势 1~3 周期时计算）
                 reversal_pct = None
                 if 1 <= consecutive <= 3 and trend not in ("数据不足", "震荡"):
@@ -379,7 +426,10 @@ class MonitorCore:
                     "deviation": round(deviation, 2),
                     "reversal_pct": round(reversal_pct, 2) if reversal_pct is not None else None,
                     "candles_count": len(klines),
-                    "ma_series": [round(v, 2) for v in recent_ma] if recent_ma else []
+                    "ma_series": [round(v, 2) for v in recent_ma] if recent_ma else [],
+                    "volume": round(volume, 2),
+                    "prev_volume": round(prev_volume, 2),
+                    "prev_high": round(prev_high, 4)
                 })
 
             results.append(result)
@@ -420,6 +470,9 @@ def refresh_data():
                     prev_iv = prev_sym[iv_name]
                     rev = detect_reversal(prev_iv["trend"], iv["trend"], iv["consecutive"])
                     if rev:
+                        cond = check_reversal_strength(iv)
+                        if not cond:
+                            continue
                         alerts.append({
                             "symbol": sym,
                             "interval": iv_name,
@@ -427,7 +480,8 @@ def refresh_data():
                             "prev_trend": prev_iv["trend"],
                             "curr_trend": iv["trend"],
                             "consecutive": iv["consecutive"],
-                            "reversal_pct": iv.get("reversal_pct")
+                            "reversal_pct": iv.get("reversal_pct"),
+                            "condition": cond
                         })
 
         cache["data"] = data
@@ -444,7 +498,9 @@ def refresh_data():
                 arrow = "↓ 下跌转折" if a["type"] == "reversal_down" else "↑ 上涨转折"
                 pct = a.get("reversal_pct")
                 pct_str = f" 累计{a['reversal_pct']:+.2f}%" if pct is not None else ""
-                print(f"  [{a['symbol']}] {a['interval']} {arrow} (已{a['consecutive']}周期){pct_str}")
+                cond = a.get("condition", "")
+                cond_str = f" [{cond}]" if cond else ""
+                print(f"  [{a['symbol']}] {a['interval']} {arrow} (已{a['consecutive']}周期){pct_str}{cond_str}")
                 print(f"     前趋势: {a['prev_trend']} → 现趋势: {a['curr_trend']}")
             print(f"{'='*60}\n")
             # 推送微信通知
@@ -1095,7 +1151,9 @@ HTML_TEMPLATE = """
                     const arrow = a.type === 'reversal_up' ? '↑' : '↓';
                     const text = a.type === 'reversal_up' ? '上涨转折' : '下跌转折';
                     const pct = a.reversal_pct !== null && a.reversal_pct !== undefined ? ` 累计${a.reversal_pct > 0 ? '+' : ''}${a.reversal_pct}%` : '';
-                    cardAlertsHtml += `<div class="card-alert ${cls}">${arrow} ${a.interval}${text} (已${a.consecutive}周期)${pct}</div>`;
+                    const cond = a.condition || '';
+                    const condStr = cond ? ` [${cond}]` : '';
+                    cardAlertsHtml += `<div class="card-alert ${cls}">${arrow} ${a.interval}${text} (已${a.consecutive}周期)${pct}${condStr}</div>`;
                 });
 
                 const posLabel = pos ? (pos === 'long' ? '多' : '空') : '';
@@ -1156,7 +1214,9 @@ HTML_TEMPLATE = """
                     const arrow = a.type === 'reversal_up' ? '↑' : '↓';
                     const text = a.type === 'reversal_up' ? '上涨转折' : '下跌转折';
                     const pct = a.reversal_pct !== null && a.reversal_pct !== undefined ? ` ${a.reversal_pct > 0 ? '+' : ''}${a.reversal_pct}%` : '';
-                    alertHtml += `<span class="alert-badge ${cls}" onclick="scrollToCard('${a.symbol}')" title="点击跳转到 ${a.symbol} 卡片">${arrow} ${a.symbol} ${a.interval}${text}${pct}</span>`;
+                    const cond = a.condition || '';
+                    const condStr = cond ? `[${cond}]` : '';
+                    alertHtml += `<span class="alert-badge ${cls}" onclick="scrollToCard('${a.symbol}')" title="点击跳转到 ${a.symbol} 卡片; 触发: ${cond || '-'}">${arrow} ${a.symbol} ${a.interval}${text}${pct} ${condStr}</span>`;
                     if (a.type === 'reversal_up') hasUp = true;
                     else hasDown = true;
                 });
