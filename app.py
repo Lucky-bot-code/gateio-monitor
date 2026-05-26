@@ -35,7 +35,8 @@ cache = {
     "last_update": None,
     "updating": False,
     "error": None,
-    "alerts": []
+    "alerts": [],
+    "divergence": []
 }
 
 # 浏览器自动打开标志（只打开一次）
@@ -106,6 +107,53 @@ def detect_reversal(prev_trend: str, curr_trend: str, curr_consecutive: int) -> 
     return None
 
 
+def analyze_divergence(data: List[Dict]) -> List[Dict]:
+    """
+    检测多周期背离信号。
+    规则：大周期连续 >= 5 个同向周期，且相邻小周期方向相反。
+    """
+    signals = []
+    hierarchy = [
+        ("日K", "4小时"),
+        ("4小时", "60分钟"),
+        ("60分钟", "15分钟"),
+    ]
+
+    for item in data:
+        symbol = item["symbol"]
+        intervals = {iv["name"]: iv for iv in item.get("intervals", [])}
+
+        for big_name, small_name in hierarchy:
+            big = intervals.get(big_name)
+            small = intervals.get(small_name)
+            if not big or not small:
+                continue
+            if big["trend"] == "数据不足" or small["trend"] == "数据不足":
+                continue
+
+            big_dir = _trend_direction(big["trend"])
+            small_dir = _trend_direction(small["trend"])
+
+            if big["consecutive"] >= 5 and big_dir in ("up", "down"):
+                if (big_dir == "up" and small_dir == "down") or (big_dir == "down" and small_dir == "up"):
+                    signal_type = "卖出信号" if big_dir == "up" else "买入信号"
+                    signals.append({
+                        "symbol": symbol,
+                        "big_interval": big_name,
+                        "small_interval": small_name,
+                        "big_trend": big["trend"],
+                        "big_consecutive": big["consecutive"],
+                        "small_trend": small["trend"],
+                        "small_consecutive": small["consecutive"],
+                        "signal": signal_type,
+                        "last": item.get("last"),
+                        "change_pct": item.get("change_pct")
+                    })
+
+    # 按标的聚合，同一标的多个层级合并展示
+    return signals
+
+
 def build_alert_state(data: List[Dict]) -> Dict:
     """将数据转换为可序列化的状态字典，用于跨运行比较"""
     state = {}
@@ -157,7 +205,7 @@ def print_banner():
    +=======================================================+
    |                                                       |
    |     G A T E . I O   M A 1 0   M O N I T O R         |
-   |              Protocol v1.2  //  ONLINE                |
+   |              Protocol v1.3  //  ONLINE                |
    |                                                       |
    +=======================================================+
 """)
@@ -383,6 +431,7 @@ def refresh_data():
 
         cache["data"] = data
         cache["alerts"] = alerts
+        cache["divergence"] = analyze_divergence(data)
         cache["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         save_state(new_state)
 
@@ -616,6 +665,64 @@ HTML_TEMPLATE = """
             .header h1 { font-size: 1rem; }
             .alert-bar { padding: 10px 12px; }
         }
+        .tabs {
+            display: flex;
+            gap: 0;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 0 20px;
+        }
+        .tab {
+            padding: 10px 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+            background: none;
+            border-top: none;
+            border-left: none;
+            border-right: none;
+        }
+        .tab:hover { color: var(--text-primary); }
+        .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+        .view { display: none; }
+        .view.active { display: block; }
+        .divergence-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; padding: 16px 20px; max-width: 1400px; margin: 0 auto; }
+        @media (max-width: 480px) { .divergence-grid { grid-template-columns: 1fr; } }
+        .divergence-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .divergence-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+        .divergence-card.buy { border-color: var(--up); box-shadow: 0 0 0 1px var(--up), 0 8px 24px rgba(16,185,129,0.12); }
+        .divergence-card.sell { border-color: var(--down); box-shadow: 0 0 0 1px var(--down), 0 8px 24px rgba(239,68,68,0.12); }
+        .divergence-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .divergence-symbol { font-size: 1.1rem; font-weight: 600; }
+        .divergence-signal {
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+        .divergence-signal.buy { background: var(--up-bg); color: var(--up); border: 1px solid var(--up); }
+        .divergence-signal.sell { background: var(--down-bg); color: var(--down); border: 1px solid var(--down); }
+        .divergence-detail { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6; }
+        .divergence-detail .hl { color: var(--text-primary); font-weight: 600; }
+        .divergence-empty { text-align: center; color: var(--text-secondary); padding: 60px 20px; }
+        .divergence-desc {
+            padding: 12px 20px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            max-width: 1400px;
+            margin: 0 auto;
+        }
     </style>
 </head>
 <body>
@@ -631,6 +738,12 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
+    <div class="tabs">
+        <button class="tab active" id="tab-monitor" onclick="switchTab('monitor')">监控面板</button>
+        <button class="tab" id="tab-divergence" onclick="switchTab('divergence')">周期背离</button>
+    </div>
+
+    <div id="view-monitor" class="view active">
     <div class="stats-bar" id="statsBar" style="display:none">
         <div class="stat">标的数: <span id="statTotal">-</span></div>
         <div class="stat">日K上涨: <span id="statDayUp">-</span></div>
@@ -656,6 +769,22 @@ HTML_TEMPLATE = """
         <div id="errorBox" class="error-box" style="display:none"></div>
         <div id="grid" class="grid" style="display:none"></div>
     </div>
+    </div>
+
+    <div id="view-divergence" class="view">
+    <div class="divergence-desc">
+        筛选规则：大周期（日K/4小时/60分钟）连续 ≥5 个周期同向，且相邻小周期方向相反时产生信号。
+    </div>
+    <div id="divergenceLoading" class="loading">
+        <div class="spinner"></div>
+        <div>正在分析周期背离...</div>
+    </div>
+    <div id="divergenceEmpty" class="divergence-empty" style="display:none">
+        <div style="font-size:1.2rem; margin-bottom:8px;">暂无背离信号</div>
+        <div>当前没有大周期连续 ≥5 周期且小周期反向的标的</div>
+    </div>
+    <div id="divergenceGrid" class="divergence-grid" style="display:none"></div>
+    </div>
 
     <script>
         let countdown = 300;
@@ -664,6 +793,88 @@ HTML_TEMPLATE = """
         let alertsCache = [];
         const POSITIONS_KEY = 'ma10_positions';
         let positionsCache = {};
+
+        function switchTab(name) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            document.getElementById('tab-' + name).classList.add('active');
+            document.getElementById('view-' + name).classList.add('active');
+            if (name === 'divergence' && divergenceCache === null) {
+                loadDivergence();
+            }
+        }
+
+        let divergenceCache = null;
+
+        async function loadDivergence() {
+            const loading = document.getElementById('divergenceLoading');
+            const empty = document.getElementById('divergenceEmpty');
+            const grid = document.getElementById('divergenceGrid');
+            loading.style.display = 'flex';
+            empty.style.display = 'none';
+            grid.style.display = 'none';
+            try {
+                const res = await fetch('/api/divergence');
+                const payload = await res.json();
+                divergenceCache = payload.data || [];
+                renderDivergence(divergenceCache);
+            } catch (e) {
+                loading.style.display = 'none';
+                empty.style.display = 'block';
+                empty.innerHTML = '<div style="color:var(--down)">加载失败: ' + e.message + '</div>';
+            }
+        }
+
+        function renderDivergence(signals) {
+            const loading = document.getElementById('divergenceLoading');
+            const empty = document.getElementById('divergenceEmpty');
+            const grid = document.getElementById('divergenceGrid');
+            loading.style.display = 'none';
+
+            if (!signals || signals.length === 0) {
+                empty.style.display = 'block';
+                grid.style.display = 'none';
+                return;
+            }
+
+            empty.style.display = 'none';
+            grid.style.display = 'grid';
+
+            // 按信号类型分组排序：买入在前，卖出在后
+            const sorted = [...signals].sort((a, b) => {
+                if (a.signal === b.signal) return a.symbol.localeCompare(b.symbol);
+                return a.signal === '买入信号' ? -1 : 1;
+            });
+
+            let html = '';
+            sorted.forEach(s => {
+                const cardClass = s.signal === '买入信号' ? 'divergence-card buy' : 'divergence-card sell';
+                const signalClass = s.signal === '买入信号' ? 'divergence-signal buy' : 'divergence-signal sell';
+                const changeClass = s.change_pct > 0 ? 'change-up' : (s.change_pct < 0 ? 'change-down' : '');
+                const changeSign = s.change_pct > 0 ? '+' : '';
+                const priceStr = s.last !== null ? s.last.toLocaleString('en-US', {maximumFractionDigits: 4}) : '-';
+                const pctStr = s.change_pct !== null ? changeSign + s.change_pct.toFixed(2) + '%' : '-';
+
+                html += `
+                    <div class="${cardClass}">
+                        <div class="divergence-header">
+                            <div class="divergence-symbol">${s.symbol}</div>
+                            <div class="${signalClass}">${s.signal}</div>
+                        </div>
+                        <div class="divergence-detail">
+                            <div>价格: <span class="hl">${priceStr}</span> <span class="${changeClass}">${pctStr}</span></div>
+                            <div>大周期: <span class="hl">${s.big_interval}</span> ${s.big_trend} (${s.big_consecutive}周期)</div>
+                            <div>小周期: <span class="hl">${s.small_interval}</span> ${s.small_trend} (${s.small_consecutive}周期)</div>
+                            <div style="margin-top:6px; color:var(--text-secondary); font-size:0.75rem;">
+                                ${s.big_interval}连续${s.big_consecutive}周期${s.big_trend.includes('上涨') ? '上涨' : '下跌'}，
+                                ${s.small_interval}与之反向，出现${s.signal === '买入信号' ? '潜在抄底' : '潜在见顶'}机会
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            grid.innerHTML = html;
+        }
 
         async function loadPositionsFromServer() {
             try {
@@ -882,9 +1093,14 @@ HTML_TEMPLATE = """
 
                 dataCache = payload.data;
                 alertsCache = payload.alerts || [];
+                divergenceCache = payload.divergence || [];
                 renderCards(dataCache, alertsCache);
                 document.getElementById('updateInfo').textContent = '更新于: ' + payload.last_update;
                 document.getElementById('errorBox').style.display = 'none';
+                // 如果当前在背离页面，同步刷新
+                if (document.getElementById('view-divergence').classList.contains('active')) {
+                    renderDivergence(divergenceCache);
+                }
             } catch (e) {
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('errorBox').style.display = 'block';
@@ -959,7 +1175,16 @@ def api_data():
         "last_update": cache["last_update"],
         "updating": cache["updating"],
         "error": cache["error"],
-        "alerts": cache["alerts"]
+        "alerts": cache["alerts"],
+        "divergence": cache["divergence"]
+    })
+
+
+@app.route("/api/divergence")
+def api_divergence():
+    return jsonify({
+        "data": cache["divergence"],
+        "last_update": cache["last_update"]
     })
 
 

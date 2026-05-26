@@ -19,6 +19,7 @@ CONFIG_FILE = "gateio_available_symbols.json"
 
 INTERVALS = {
     "1d":  "日K",
+    "4h":  "4小时",
     "1h":  "60分钟",
     "15m": "15分钟",
 }
@@ -379,6 +380,50 @@ class GateioFuturesMonitor:
             ok = send_wecom_alert(alerts, now_str)
             if ok:
                 print("  微信通知已发送")
+            print("=" * 70)
+
+        # 多周期背离检测
+        divergence_signals = []
+        hierarchy = [
+            ("日K", "4小时"),
+            ("4小时", "60分钟"),
+            ("60分钟", "15分钟"),
+        ]
+        for item in results:
+            symbol = item["symbol"]
+            intervals = {iv["name"]: iv for iv in item.get("intervals", [])}
+            for big_name, small_name in hierarchy:
+                big = intervals.get(big_name)
+                small = intervals.get(small_name)
+                if not big or not small:
+                    continue
+                if big["trend"] == "数据不足" or small["trend"] == "数据不足":
+                    continue
+                big_dir = _trend_direction(big["trend"])
+                small_dir = _trend_direction(small["trend"])
+                if big["consecutive"] >= 5 and big_dir in ("up", "down"):
+                    if (big_dir == "up" and small_dir == "down") or (big_dir == "down" and small_dir == "up"):
+                        signal_type = "卖出信号" if big_dir == "up" else "买入信号"
+                        divergence_signals.append({
+                            "symbol": symbol,
+                            "big_interval": big_name,
+                            "small_interval": small_name,
+                            "big_trend": big["trend"],
+                            "big_consecutive": big["consecutive"],
+                            "small_trend": small["trend"],
+                            "small_consecutive": small["consecutive"],
+                            "signal": signal_type
+                        })
+
+        if divergence_signals:
+            print("\n" + "=" * 70)
+            print("  周期背离信号")
+            print("=" * 70)
+            for d in divergence_signals:
+                arrow = "↑" if d["signal"] == "买入信号" else "↓"
+                print(f"  {arrow} [{d['symbol']}] {d['signal']}")
+                print(f"     {d['big_interval']}: {d['big_trend']} ({d['big_consecutive']}周期)")
+                print(f"     {d['small_interval']}: {d['small_trend']} ({d['small_consecutive']}周期) — 与大周期反向")
             print("=" * 70)
 
         save_state(build_state(results))
