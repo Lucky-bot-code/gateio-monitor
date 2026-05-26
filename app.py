@@ -723,6 +723,38 @@ HTML_TEMPLATE = """
             max-width: 1400px;
             margin: 0 auto;
         }
+        .tab-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 5px;
+            border-radius: 9px;
+            font-size: 0.65rem;
+            font-weight: 700;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+        .tab-badge.buy { background: var(--up-bg); color: var(--up); }
+        .tab-badge.sell { background: var(--down-bg); color: var(--down); }
+        .tab-badge.mixed { background: var(--accent); color: white; }
+        .card-div-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: 700;
+            cursor: pointer;
+            margin-left: 6px;
+            transition: opacity 0.2s;
+            vertical-align: middle;
+        }
+        .card-div-badge:hover { opacity: 0.85; }
+        .card-div-badge.buy { background: var(--up-bg); color: var(--up); border: 1px solid var(--up); }
+        .card-div-badge.sell { background: var(--down-bg); color: var(--down); border: 1px solid var(--down); }
     </style>
 </head>
 <body>
@@ -740,7 +772,7 @@ HTML_TEMPLATE = """
 
     <div class="tabs">
         <button class="tab active" id="tab-monitor" onclick="switchTab('monitor')">监控面板</button>
-        <button class="tab" id="tab-divergence" onclick="switchTab('divergence')">周期背离</button>
+        <button class="tab" id="tab-divergence" onclick="switchTab('divergence')">周期背离<span id="divergenceBadge" class="tab-badge" style="display:none"></span></button>
     </div>
 
     <div id="view-monitor" class="view active">
@@ -834,6 +866,21 @@ HTML_TEMPLATE = """
             const empty = document.getElementById('divergenceEmpty');
             const grid = document.getElementById('divergenceGrid');
             loading.style.display = 'none';
+
+            // 更新标签页 badge
+            const badge = document.getElementById('divergenceBadge');
+            if (signals && signals.length > 0) {
+                const buyCount = signals.filter(s => s.signal === '买入信号').length;
+                const sellCount = signals.length - buyCount;
+                let badgeCls = 'mixed';
+                if (buyCount > 0 && sellCount === 0) badgeCls = 'buy';
+                else if (sellCount > 0 && buyCount === 0) badgeCls = 'sell';
+                badge.className = 'tab-badge ' + badgeCls;
+                badge.textContent = signals.length;
+                badge.style.display = '';
+            } else {
+                badge.style.display = 'none';
+            }
 
             if (!signals || signals.length === 0) {
                 empty.style.display = 'block';
@@ -966,6 +1013,13 @@ HTML_TEMPLATE = """
                 symAlerts[a.symbol].push(a);
             });
 
+            // 构建标的→背离信号映射
+            const symDivergence = {};
+            (divergenceCache || []).forEach(d => {
+                if (!symDivergence[d.symbol]) symDivergence[d.symbol] = [];
+                symDivergence[d.symbol].push(d);
+            });
+
             // 有持仓的卡片置顶 (short > long > 无)
             const posWeight = (p) => p === 'short' ? 2 : (p === 'long' ? 1 : 0);
             const sortedData = [...data].sort((a, b) => {
@@ -1025,13 +1079,25 @@ HTML_TEMPLATE = """
                 const posClass = pos || '';
                 const cardClass = pos ? `card ${pos}` : 'card';
 
+                const divForSym = symDivergence[item.symbol] || [];
+                const hasBuy = divForSym.some(d => d.signal === '买入信号');
+                const hasSell = divForSym.some(d => d.signal === '卖出信号');
+                let divBadgeHtml = '';
+                if (divForSym.length > 0) {
+                    const bCls = hasBuy && !hasSell ? 'buy' : (hasSell && !hasBuy ? 'sell' : 'mixed');
+                    const bLabel = hasBuy && hasSell ? 'B/S' : (hasBuy ? 'B' : 'S');
+                    const bCount = divForSym.length > 1 ? divForSym.length : '';
+                    const bTitle = divForSym.map(d => `${d.signal}(${d.big_interval}→${d.small_interval})`).join('; ');
+                    divBadgeHtml = `<span class="card-div-badge ${bCls}" onclick="event.stopPropagation();switchTab('divergence')" title="背离: ${bTitle}">${bLabel}${bCount}</span>`;
+                }
+
                 html += `
                     <div class="${cardClass}" id="card-${item.symbol}">
                         ${cardAlertsHtml}
                         <div class="card-header">
                             <div class="card-title">
                                 <span class="card-pos ${posClass}" onclick="cyclePosition('${item.symbol}')" title="点击切换: 无持仓 → 做多 → 做空">${posLabel || '＋'}</span>
-                                ${item.symbol}
+                                ${item.symbol}${divBadgeHtml}
                             </div>
                             <div class="card-price">
                                 <div class="last">${formatPrice(item.last)}</div>
