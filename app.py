@@ -799,8 +799,12 @@ HTML_TEMPLATE = """
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
             document.getElementById('tab-' + name).classList.add('active');
             document.getElementById('view-' + name).classList.add('active');
-            if (name === 'divergence' && divergenceCache === null) {
-                loadDivergence();
+            if (name === 'divergence') {
+                if (divergenceCache === null) {
+                    loadDivergence();
+                } else {
+                    renderDivergence(divergenceCache);
+                }
             }
         }
 
