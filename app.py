@@ -378,7 +378,8 @@ class MonitorCore:
                     "close": round(closes[-1], 4),
                     "deviation": round(deviation, 2),
                     "reversal_pct": round(reversal_pct, 2) if reversal_pct is not None else None,
-                    "candles_count": len(klines)
+                    "candles_count": len(klines),
+                    "ma_series": [round(v, 2) for v in recent_ma] if recent_ma else []
                 })
 
             results.append(result)
@@ -1001,6 +1002,25 @@ HTML_TEMPLATE = """
             return price.toFixed(6);
         }
 
+        function sparklineSvg(data, trendClass) {
+            if (!data || data.length < 2) return '';
+            const vals = data.map(Number);
+            const mn = Math.min(...vals);
+            const mx = Math.max(...vals);
+            const range = mx - mn || 1;
+            const w = Math.max(vals.length * 8, 40);
+            const h = 20;
+            const pts = vals.map((v, i) => {
+                const x = i * (w / (vals.length - 1));
+                const y = h - 2 - ((v - mn) / range * (h - 4));
+                return `${x},${y.toFixed(1)}`;
+            });
+            const color = trendClass.includes('up') ? '#10b981' : (trendClass.includes('down') ? '#ef4444' : '#6b7280');
+            return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;margin:2px auto 0;overflow:visible">
+                <polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+            </svg>`;
+        }
+
         function renderCards(data, alerts) {
             const grid = document.getElementById('grid');
             let html = '';
@@ -1044,6 +1064,7 @@ HTML_TEMPLATE = """
                             <div class="name">${iv.name}</div>
                             <div class="trend">${iv.trend}${countInfo}</div>
                             <div class="detail">${detail}</div>
+                            ${sparklineSvg(iv.ma_series, trendClass)}
                         </div>
                     `;
 
