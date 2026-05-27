@@ -13,6 +13,7 @@ import subprocess
 import threading
 import logging
 import importlib.metadata
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import webbrowser
 import requests
 from datetime import datetime, timedelta
@@ -24,7 +25,7 @@ BASE_URL = "https://api.gateio.ws/api/v4"
 CONFIG_FILE = "gateio_available_symbols.json"
 PORT = 5000
 AUTO_REFRESH_INTERVAL = 300  # 保留作为后备间隔(秒)，实际使用对齐K线收盘的动态调度
-REQUEST_DELAY = 0.25  # API请求间隔
+REQUEST_DELAY = 0.12  # API 请求间隔（并行模式下仅影响同标的连续请求）
 KLINES_LIMIT = 50
 
 # 下一次自动刷新的启动时间戳（auto_refresh_loop 启动后更新）
@@ -200,17 +201,17 @@ def check_reversal_strength(iv: Dict, rev: str) -> Optional[str]:
     if cons == 2:
         conds = []
         if is_up:
-            prev2_high = iv.get("prev2_high", 0)
+            prev_high = iv.get("prev_high", 0)
             if close is not None and ma10 is not None and close > ma10:
                 conds.append("价格>MA10")
-            if close is not None and prev2_high > 0 and close > prev2_high:
-                conds.append("价格>前二高")
+            if close is not None and prev_high > 0 and close > prev_high:
+                conds.append("价格>前高")
         else:
-            prev2_low = iv.get("prev2_low", float("inf"))
+            prev_low = iv.get("prev_low", float("inf"))
             if close is not None and ma10 is not None and close < ma10:
                 conds.append("价格<MA10")
-            if close is not None and prev2_low != float("inf") and close < prev2_low:
-                conds.append("价格<前二低")
+            if close is not None and prev_low != float("inf") and close < prev_low:
+                conds.append("价格<前低")
         if conds:
             return "+".join(conds)
         return None
@@ -394,10 +395,11 @@ class MonitorCore:
             data = json.load(f)
         return data.get("available", [])
 
-    def fetch_ticker(self, contract: str) -> Optional[Dict]:
+    def fetch_ticker(self, contract: str, session=None) -> Optional[Dict]:
+        s = session or self.session
         try:
             url = f"{BASE_URL}/futures/usdt/tickers"
-            resp = self.session.get(url, params={"contract": contract}, timeout=15)
+            resp = s.get(url, params={"contract": contract}, timeout=15)
             data = resp.json()
             if data and isinstance(data, list) and len(data) > 0:
                 return data[0]
@@ -405,10 +407,11 @@ class MonitorCore:
             pass
         return None
 
-    def fetch_klines(self, contract: str, interval: str, limit: int = 100) -> Optional[List[Dict]]:
+    def fetch_klines(self, contract: str, interval: str, limit: int = 100, session=None) -> Optional[List[Dict]]:
+        s = session or self.session
         try:
             url = f"{BASE_URL}/futures/usdt/candlesticks"
-            resp = self.session.get(url, params={"contract": contract, "interval": interval, "limit": limit}, timeout=15)
+            resp = s.get(url, params={"contract": contract, "interval": interval, "limit": limit}, timeout=15)
             return resp.json()
         except Exception:
             return None
@@ -457,96 +460,118 @@ class MonitorCore:
         else:
             return "震荡", 0, display_window
 
+    def _fetch_symbol_data(self, sym_info: Dict, session) -> Dict:
+        """获取单个标的的 ticker + 4 周期 K 线数据"""
+        contract = sym_info["contract"]
+        user_symbol = sym_info.get("user_symbol", contract)
+        result = {"symbol": user_symbol, "contract": contract, "intervals": []}
+
+        # Ticker
+        ticker = self.fetch_ticker(contract, session)
+        if ticker:
+            result["last"] = float(ticker.get("last", 0))
+            result["change_pct"] = float(ticker.get("change_percentage", 0))
+            result["mark_price"] = float(ticker.get("mark_price", 0))
+            result["index_price"] = float(ticker.get("index_price", 0))
+            result["funding_rate"] = float(ticker.get("funding_rate", 0))
+        else:
+            result["last"] = None
+            result["change_pct"] = None
+
+        time.sleep(REQUEST_DELAY)
+
+        # 各周期
+        for interval, interval_name in [("1d", "日K"), ("4h", "4小时"), ("1h", "60分钟"), ("15m", "15分钟")]:
+            klines = self.fetch_klines(contract, interval, KLINES_LIMIT, session)
+            time.sleep(REQUEST_DELAY)
+
+            if not klines or len(klines) < 20:
+                result["intervals"].append({
+                    "name": interval_name,
+                    "interval": interval,
+                    "trend": "数据不足",
+                    "consecutive": 0,
+                    "ma10": None,
+                    "close": None,
+                    "deviation": None,
+                    "candles_count": len(klines) if klines else 0
+                })
+                continue
+
+            klines_sorted = sorted(klines, key=lambda x: int(x["t"]))
+            closes = [float(k["c"]) for k in klines_sorted]
+            ma10 = self.calculate_ma(closes, period=10)
+            valid_ma = [v for v in ma10 if v is not None]
+            trend, consecutive, recent_ma = self.analyze_trend(ma10, min_consecutive=3)
+            deviation = (closes[-1] - valid_ma[-1]) / valid_ma[-1] * 100 if valid_ma else 0
+
+            cur_k = klines_sorted[-1]
+            prev_k = klines_sorted[-2] if len(klines_sorted) >= 2 else None
+            prev2_k = klines_sorted[-3] if len(klines_sorted) >= 3 else None
+            volume = float(cur_k["v"])
+            prev_volume = float(prev_k["v"]) if prev_k else 0
+            prev_high = float(prev_k["h"]) if prev_k else 0
+            prev2_high = float(prev2_k["h"]) if prev2_k else 0
+            prev_low = float(prev_k["l"]) if prev_k else float("inf")
+            prev2_low = float(prev2_k["l"]) if prev2_k else float("inf")
+
+            reversal_pct = None
+            if 1 <= consecutive <= 3 and trend not in ("数据不足", "震荡"):
+                if len(closes) >= consecutive + 2:
+                    start_close = closes[-consecutive - 1]
+                    if start_close != 0:
+                        reversal_pct = (closes[-1] - start_close) / start_close * 100
+
+            result["intervals"].append({
+                "name": interval_name,
+                "interval": interval,
+                "trend": trend,
+                "consecutive": consecutive,
+                "ma10": round(valid_ma[-1], 4) if valid_ma else None,
+                "close": round(closes[-1], 4),
+                "deviation": round(deviation, 2),
+                "reversal_pct": round(reversal_pct, 2) if reversal_pct is not None else None,
+                "candles_count": len(klines),
+                "ma_series": [round(v, 2) for v in recent_ma] if recent_ma else [],
+                "volume": round(volume, 2),
+                "prev_volume": round(prev_volume, 2),
+                "prev_high": round(prev_high, 4),
+                "prev2_high": round(prev2_high, 4),
+                "prev_low": round(prev_low, 4) if prev_low != float("inf") else float("inf"),
+                "prev2_low": round(prev2_low, 4) if prev2_low != float("inf") else float("inf")
+            })
+
+        return result
+
     def analyze_all(self) -> List[Dict]:
         results = []
         total = len(self.symbols)
         if total == 0:
             return results
-        print("[SYNC] Acquiring market data stream...")
-        for idx, sym_info in enumerate(self.symbols, 1):
-            contract = sym_info["contract"]
-            user_symbol = sym_info.get("user_symbol", contract)
-            result = {"symbol": user_symbol, "contract": contract, "intervals": []}
+        workers = min(8, max(3, total // 10))
+        print(f"[SYNC] Acquiring market data stream (parallel mode, {workers} workers)...")
 
-            # Ticker
-            ticker = self.fetch_ticker(contract)
-            if ticker:
-                result["last"] = float(ticker.get("last", 0))
-                result["change_pct"] = float(ticker.get("change_percentage", 0))
-                result["mark_price"] = float(ticker.get("mark_price", 0))
-                result["index_price"] = float(ticker.get("index_price", 0))
-                result["funding_rate"] = float(ticker.get("funding_rate", 0))
-            else:
-                result["last"] = None
-                result["change_pct"] = None
+        progress_lock = threading.Lock()
+        completed = [0]
 
-            time.sleep(REQUEST_DELAY)
+        def process_one(idx_sym):
+            idx, sym_info = idx_sym
+            session = requests.Session()
+            data = self._fetch_symbol_data(sym_info, session)
+            session.close()
+            with progress_lock:
+                completed[0] += 1
+                print_progress(completed[0], total, sym_info.get("user_symbol", sym_info["contract"]))
+            return idx, data
 
-            # 各周期
-            for interval, interval_name in [("1d", "日K"), ("4h", "4小时"), ("1h", "60分钟"), ("15m", "15分钟")]:
-                klines = self.fetch_klines(contract, interval, limit=KLINES_LIMIT)
-                time.sleep(REQUEST_DELAY)
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(process_one, (i, s)): i for i, s in enumerate(self.symbols)}
+            results = [None] * total
+            for future in as_completed(futures):
+                idx, data = future.result()
+                results[idx] = data
 
-                if not klines or len(klines) < 20:
-                    result["intervals"].append({
-                        "name": interval_name,
-                        "interval": interval,
-                        "trend": "数据不足",
-                        "consecutive": 0,
-                        "ma10": None,
-                        "close": None,
-                        "deviation": None,
-                        "candles_count": len(klines) if klines else 0
-                    })
-                    continue
-
-                klines_sorted = sorted(klines, key=lambda x: int(x["t"]))
-                closes = [float(k["c"]) for k in klines_sorted]
-                ma10 = self.calculate_ma(closes, period=10)
-                valid_ma = [v for v in ma10 if v is not None]
-                trend, consecutive, recent_ma = self.analyze_trend(ma10, min_consecutive=3)
-                deviation = (closes[-1] - valid_ma[-1]) / valid_ma[-1] * 100 if valid_ma else 0
-
-                # 成交量与前高数据（用于转折预警强度判断）
-                cur_k = klines_sorted[-1]
-                prev_k = klines_sorted[-2] if len(klines_sorted) >= 2 else None
-                prev2_k = klines_sorted[-3] if len(klines_sorted) >= 3 else None
-                volume = float(cur_k["v"])
-                prev_volume = float(prev_k["v"]) if prev_k else 0
-                prev_high = float(prev_k["h"]) if prev_k else 0
-                prev2_high = float(prev2_k["h"]) if prev2_k else 0
-                prev_low = float(prev_k["l"]) if prev_k else float("inf")
-                prev2_low = float(prev2_k["l"]) if prev2_k else float("inf")
-
-                # 转折连续周期对应的总涨跌幅（仅在新趋势 1~3 周期时计算）
-                reversal_pct = None
-                if 1 <= consecutive <= 3 and trend not in ("数据不足", "震荡"):
-                    if len(closes) >= consecutive + 2:
-                        start_close = closes[-consecutive - 1]
-                        if start_close != 0:
-                            reversal_pct = (closes[-1] - start_close) / start_close * 100
-
-                result["intervals"].append({
-                    "name": interval_name,
-                    "interval": interval,
-                    "trend": trend,
-                    "consecutive": consecutive,
-                    "ma10": round(valid_ma[-1], 4) if valid_ma else None,
-                    "close": round(closes[-1], 4),
-                    "deviation": round(deviation, 2),
-                    "reversal_pct": round(reversal_pct, 2) if reversal_pct is not None else None,
-                    "candles_count": len(klines),
-                    "ma_series": [round(v, 2) for v in recent_ma] if recent_ma else [],
-                    "volume": round(volume, 2),
-                    "prev_volume": round(prev_volume, 2),
-                    "prev_high": round(prev_high, 4),
-                    "prev2_high": round(prev2_high, 4),
-                    "prev_low": round(prev_low, 4) if prev_low != float("inf") else float("inf"),
-                    "prev2_low": round(prev2_low, 4) if prev2_low != float("inf") else float("inf")
-                })
-
-            results.append(result)
-            print_progress(idx, total, user_symbol)
+        results = [r for r in results if r is not None]
         print(f"[ OK ] Data acquisition complete. {total} assets monitored.")
         return results
 
@@ -781,6 +806,20 @@ HTML_TEMPLATE = """
         .btn:hover { opacity: 0.9; }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .countdown { font-size: 0.75rem; color: var(--text-secondary); min-width: 80px; text-align: right; }
+        .search-bar {
+            display: flex; align-items: center; gap: 12px;
+            margin-bottom: 12px; flex-wrap: wrap;
+        }
+        .search-input {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 8px; padding: 10px 14px;
+            color: var(--text-primary); font-size: 0.9rem;
+            width: 260px; max-width: 100%; outline: none;
+            transition: border-color 0.2s;
+        }
+        .search-input:focus { border-color: var(--accent); }
+        .search-input::placeholder { color: var(--text-secondary); }
+        .search-count { font-size: 0.8rem; color: var(--text-secondary); white-space: nowrap; }
         .stats-bar {
             display: flex;
             gap: 16px;
@@ -827,6 +866,24 @@ HTML_TEMPLATE = """
         .card-pos.short { background: var(--down-bg); color: var(--down); border-color: var(--down); }
         .card.long { border-color: var(--up); box-shadow: 0 0 0 1px var(--up), 0 8px 24px rgba(16,185,129,0.12); }
         .card.short { border-color: var(--down); box-shadow: 0 0 0 1px var(--down), 0 8px 24px rgba(239,68,68,0.12); }
+        .pos-dropdown {
+            position: fixed; z-index: 200;
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 8px; padding: 4px;
+            display: flex; flex-direction: column; gap: 2px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4); min-width: 70px;
+        }
+        .pos-dropdown-option {
+            padding: 8px 16px; border-radius: 4px;
+            cursor: pointer; font-size: 0.85rem; font-weight: 600;
+            text-align: center; border: none; background: transparent;
+            color: var(--text-secondary); transition: background 0.15s;
+            white-space: nowrap;
+        }
+        .pos-dropdown-option:hover { background: var(--bg-card); }
+        .pos-dropdown-option.long { color: var(--up); }
+        .pos-dropdown-option.short { color: var(--down); }
+        .pos-dropdown-option.active { background: var(--bg-card); outline: 1px solid var(--border); }
         .card-price { text-align: right; }
         .card-price .last { font-size: 1.1rem; font-weight: 600; }
         .card-price .change { font-size: 0.8rem; margin-top: 2px; }
@@ -1052,6 +1109,10 @@ HTML_TEMPLATE = """
             <div>正在加载监控数据...</div>
         </div>
         <div id="errorBox" class="error-box" style="display:none"></div>
+        <div class="search-bar" id="searchBar" style="display:none">
+            <input type="text" id="searchInput" class="search-input" placeholder="搜索合约...">
+            <span class="search-count" id="searchCount"></span>
+        </div>
         <div id="grid" class="grid" style="display:none"></div>
     </div>
     </div>
@@ -1076,6 +1137,23 @@ HTML_TEMPLATE = """
         let countdownTimer;
         let dataCache = null;
         let alertsCache = [];
+        let currentSearchQuery = '';
+
+        function applyFilter() {
+            var query = currentSearchQuery;
+            var cards = document.querySelectorAll('#grid .card');
+            var visibleCount = 0;
+            cards.forEach(function(card) {
+                var symbol = card.id.replace('card-', '').toLowerCase();
+                var match = !query || symbol.indexOf(query) !== -1;
+                card.style.display = match ? '' : 'none';
+                if (match) visibleCount++;
+            });
+            var countEl = document.getElementById('searchCount');
+            if (countEl) {
+                countEl.textContent = '显示 ' + visibleCount + ' / ' + cards.length + ' 个标的';
+            }
+        }
         const POSITIONS_KEY = 'ma10_positions';
         let positionsCache = {};
 
@@ -1213,31 +1291,96 @@ HTML_TEMPLATE = """
             }
         }
 
-        async function cyclePosition(symbol) {
-            const positions = {...positionsCache};
-            const current = positions[symbol];
-            let newPos = null;
-            if (current === 'long') {
-                newPos = 'short';
-                positions[symbol] = 'short';
-            } else if (current === 'short') {
-                delete positions[symbol];
-                newPos = null;
+        function showPositionDropdown(symbol, event) {
+            event.stopPropagation();
+            closePositionDropdown();
+
+            var trigger = event.currentTarget;
+            var rect = trigger.getBoundingClientRect();
+            var positions = loadPositions();
+            var current = positions[symbol] || null;
+
+            var dropdown = document.createElement('div');
+            dropdown.className = 'pos-dropdown';
+            dropdown.id = 'posDropdown';
+
+            var options = [
+                { value: 'long', label: '多', cls: 'long' },
+                { value: 'short', label: '空', cls: 'short' },
+                { value: null, label: '无', cls: 'none' }
+            ];
+
+            options.forEach(function(opt) {
+                var btn = document.createElement('button');
+                btn.className = 'pos-dropdown-option ' + opt.cls;
+                if (current === opt.value) btn.classList.add('active');
+                btn.textContent = opt.label;
+                btn.onclick = function(e) {
+                    e.stopPropagation();
+                    selectPosition(symbol, opt.value);
+                };
+                dropdown.appendChild(btn);
+            });
+
+            var left = Math.max(4, rect.left);
+            if (left + 70 > window.innerWidth - 4) left = window.innerWidth - 74;
+            dropdown.style.top = (rect.bottom + 4) + 'px';
+            dropdown.style.left = left + 'px';
+
+            document.body.appendChild(dropdown);
+            setTimeout(function() {
+                document.addEventListener('click', closePositionDropdown, { once: true });
+            }, 0);
+        }
+
+        function closePositionDropdown() {
+            var existing = document.getElementById('posDropdown');
+            if (existing) existing.remove();
+        }
+
+        function selectPosition(symbol, newPos) {
+            closePositionDropdown();
+
+            var positions = JSON.parse(JSON.stringify(loadPositions()));
+            if (newPos) {
+                positions[symbol] = newPos;
             } else {
-                newPos = 'long';
-                positions[symbol] = 'long';
+                delete positions[symbol];
             }
             savePositions(positions);
-            renderCards(dataCache, alertsCache);
-            try {
-                await fetch('/api/position', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({symbol, position: newPos})
-                });
-            } catch (e) {
+            updateCardPositionDOM(symbol, newPos);
+
+            fetch('/api/position', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbol: symbol, position: newPos })
+            }).catch(function(e) {
                 console.error('同步持仓到服务器失败', e);
+            });
+        }
+
+        function updateCardPositionDOM(symbol, newPos) {
+            var card = document.getElementById('card-' + symbol);
+            if (!card) return;
+
+            card.classList.remove('long', 'short');
+            if (newPos) card.classList.add(newPos);
+
+            var badge = card.querySelector('.card-pos');
+            if (badge) {
+                badge.classList.remove('long', 'short');
+                if (newPos) {
+                    badge.classList.add(newPos);
+                    badge.textContent = newPos === 'long' ? '多' : '空';
+                } else {
+                    badge.textContent = '＋';
+                }
             }
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
 
         function getTrendClass(trend) {
@@ -1347,7 +1490,7 @@ HTML_TEMPLATE = """
                     const arrow = a.type === 'reversal_up' ? '↑' : '↓';
                     const text = a.type === 'reversal_up' ? '上涨转折' : '下跌转折';
                     const pct = a.reversal_pct !== null && a.reversal_pct !== undefined ? ` 累计${a.reversal_pct > 0 ? '+' : ''}${a.reversal_pct}%` : '';
-                    const cond = a.condition || '';
+                    const cond = escapeHtml(a.condition);
                     const condStr = cond ? ` [${cond}]` : '';
                     cardAlertsHtml += `<div class="card-alert ${cls}">${arrow} ${a.interval}${text} (已${a.consecutive}周期)${pct}${condStr}</div>`;
                 });
@@ -1373,7 +1516,7 @@ HTML_TEMPLATE = """
                         ${cardAlertsHtml}
                         <div class="card-header">
                             <div class="card-title">
-                                <span class="card-pos ${posClass}" onclick="cyclePosition('${item.symbol}')" title="点击切换: 无持仓 → 做多 → 做空">${posLabel || '＋'}</span>
+                                <span class="card-pos ${posClass}" onclick="showPositionDropdown('${item.symbol}', event)" data-symbol="${item.symbol}" title="点击设置持仓">${posLabel || '＋'}</span>
                                 ${item.symbol}${divBadgeHtml}
                             </div>
                             <div class="card-price">
@@ -1388,6 +1531,9 @@ HTML_TEMPLATE = """
 
             grid.innerHTML = html;
             grid.style.display = 'grid';
+
+            document.getElementById('searchBar').style.display = 'flex';
+            applyFilter();
 
             document.getElementById('statsBar').style.display = 'flex';
             document.getElementById('statTotal').textContent = stats.total;
@@ -1410,7 +1556,7 @@ HTML_TEMPLATE = """
                     const arrow = a.type === 'reversal_up' ? '↑' : '↓';
                     const text = a.type === 'reversal_up' ? '上涨转折' : '下跌转折';
                     const pct = a.reversal_pct !== null && a.reversal_pct !== undefined ? ` ${a.reversal_pct > 0 ? '+' : ''}${a.reversal_pct}%` : '';
-                    const cond = a.condition || '';
+                    const cond = escapeHtml(a.condition);
                     const condStr = cond ? `[${cond}]` : '';
                     alertHtml += `<span class="alert-badge ${cls}" onclick="scrollToCard('${a.symbol}')" title="点击跳转到 ${a.symbol} 卡片; 触发: ${cond || '-'}">${arrow} ${a.symbol} ${a.interval}${text}${pct} ${condStr}</span>`;
                     if (a.type === 'reversal_up') hasUp = true;
@@ -1525,6 +1671,11 @@ HTML_TEMPLATE = """
                 }
             }, 1000);
         }
+
+        document.getElementById('searchInput').addEventListener('input', function() {
+            currentSearchQuery = this.value.toLowerCase().trim();
+            applyFilter();
+        });
 
         loadPositionsFromServer().then(() => {
             loadData();

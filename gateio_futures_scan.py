@@ -1,115 +1,88 @@
 #!/usr/bin/env python3
 """
-扫描 Gate.io U本位合约市场，筛选用户指定标的中可用的合约
+Gate.io U本位合约市场标的扫描器
+按 24h 成交额 (volume_24h_quote) 排名，取前 N 个可用标的
 """
 import requests
 import json
+import time
 
 BASE_URL = "https://api.gateio.ws/api/v4"
-
-USER_SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "HYPEUSDT", "ZECUSDT", "NEARUSDT",
-    "CLUSDT", "BSBUSDT", "XRPUSDT", "BEATUSDT", "DOGEUSDT", "SUIUSDT",
-    "ONDOUSDT", "GMTUSDT", "INUSDT", "GRASSUSDT", "XAUUSDT", "XAGUSDT",
-    "BILLUSDT", "TAOUSDT", "1000PEPEUSDT", "EDENUSDT", "WLDUSDT",
-    "MUUSDT", "SNDKUSDT", "NVDAUSDT", "QQQUSDT", "SOXLUSDT", "CRCLUSDT",
-    "EWYUSDT", "INTCUSDT", "MSTRUSDT", "SPYUSDT", "TSLAUSDT", "DRAMUSDT",
-    "CBRSUSDT", "AMDUSDT", "QCOMUSDT", "GOOGLUSDT", "COINUSDT",
-    "NATGASUSDT", "TSMUSDT", "AMZNUSDT"
-]
-
-
-def to_gateio_futures_format(sym: str) -> str:
-    """将用户格式转换为 Gate.io 合约格式"""
-    if sym.endswith("USDT"):
-        return sym[:-4] + "_USDT"
-    return sym
-
-
-def fetch_all_contracts():
-    url = f"{BASE_URL}/futures/usdt/contracts"
-    try:
-        resp = requests.get(url, timeout=20)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        print(f"获取合约列表失败: {e}")
-        return []
-
-
-def fetch_ticker(contract: str):
-    url = f"{BASE_URL}/futures/usdt/tickers"
-    try:
-        resp = requests.get(url, params={"contract": contract}, timeout=10)
-        data = resp.json()
-        if data and len(data) > 0 and data[0].get("contract") == contract:
-            return data[0]
-    except Exception:
-        pass
-    return None
+CONFIG_FILE = "gateio_available_symbols.json"
+TOP_N = 100  # 取成交额排名前 N 个
 
 
 def main():
     print("=" * 70)
-    print("Gate.io U本位合约标的可用性扫描")
+    print("Gate.io U本位合约标的扫描（按成交额排名 TOP {}）".format(TOP_N))
     print("=" * 70)
 
-    # 1. 获取所有合约名称
-    print("\n正在获取 Gate.io U本位合约全量列表...")
-    contracts = fetch_all_contracts()
-    all_names = set(c.get("name", "") for c in contracts)
-    print(f"Gate.io U本位合约总数: {len(all_names)}")
+    # 1. 获取全量 ticker，按 24h 成交额排序
+    print("\n正在获取全量 ticker（按 24h 成交额排名）...")
+    try:
+        resp = requests.get(f"{BASE_URL}/futures/usdt/tickers", timeout=30)
+        resp.raise_for_status()
+        all_tickers = resp.json()
+    except Exception as e:
+        print(f"获取 ticker 列表失败: {e}")
+        return
 
-    # 2. 逐一匹配并测试
-    print(f"\n开始测试 {len(USER_SYMBOLS)} 个标的...")
-    print(f"{'用户标的':<18s} {'合约名称':<20s} {'状态':<10s} {'最新价':<15s} {'24h涨跌':<10s}")
-    print("-" * 85)
+    print(f"Gate.io U本位合约总数: {len(all_tickers)}")
+
+    # 按 volume_24h_quote 降序排列
+    sorted_tickers = sorted(
+        all_tickers,
+        key=lambda x: float(x.get("volume_24h_quote", 0)),
+        reverse=True
+    )
+
+    # 2. 取前 N 个
+    top_tickers = sorted_tickers[:TOP_N]
+    print(f"取成交额前 {TOP_N} 个标的，正在验证...")
+    print(f"{'排名':<6s} {'合约':<22s} {'最新价':<15s} {'24h涨跌':<10s} {'24h成交额(USD)':<18s}")
+    print("-" * 75)
 
     available = []
     unavailable = []
 
-    for sym in USER_SYMBOLS:
-        contract = to_gateio_futures_format(sym)
+    for i, t in enumerate(top_tickers, 1):
+        contract = t["contract"]
+        last = float(t.get("last", 0))
+        change = float(t.get("change_percentage", 0))
+        vol_quote = float(t.get("volume_24h_quote", 0))
 
-        if contract not in all_names:
-            print(f"{sym:<18s} {contract:<20s} {'不存在':<10s} {'-':<15s} {'-':<10s}")
-            unavailable.append(sym)
-            continue
+        # 合约名转回用户符号名（去掉下划线）
+        user_symbol = contract.replace("_", "")
 
-        ticker = fetch_ticker(contract)
-        if ticker:
-            last = float(ticker.get("last", 0))
-            change = float(ticker.get("change_percentage", 0))
-            print(f"{sym:<18s} {contract:<20s} {'可用':<10s} {last:<15.4f} {change:+.2f}%")
-            available.append({
-                "user_symbol": sym,
-                "contract": contract,
-                "last": last,
-                "change_percentage": change
-            })
-        else:
-            print(f"{sym:<18s} {contract:<20s} {'Ticker失败':<10s} {'-':<15s} {'-':<10s}")
-            unavailable.append(sym)
+        print(f"{i:<6d} {contract:<22s} {last:<15.4f} {change:+.2f}%     ${vol_quote:,.0f}")
+
+        available.append({
+            "user_symbol": user_symbol,
+            "contract": contract,
+            "last": last,
+            "change_percentage": change,
+            "volume_24h_quote": vol_quote,
+            "rank": i
+        })
 
     # 3. 输出汇总
-    print("-" * 85)
-    print(f"\n可用标的: {len(available)}/{len(USER_SYMBOLS)}")
-    if available:
-        names = [a["contract"] for a in available]
-        print(f"  {names}")
+    print("-" * 75)
+    print(f"\n可用标的: {len(available)}/{TOP_N}")
+    print(f"成交额范围: ${available[-1]['volume_24h_quote']:,.0f} ~ ${available[0]['volume_24h_quote']:,.0f}")
 
-    print(f"\n不可用标的: {len(unavailable)}/{len(USER_SYMBOLS)}")
-    if unavailable:
-        print(f"  {unavailable}")
+    # 按品类统计
+    crypto_count = sum(1 for a in available if not any(a["user_symbol"].startswith(p) for p in ["MU", "SNDK", "NVDA", "QQQ", "SOXL", "CRCL", "EWY", "INTC", "MSTR", "SPY", "TSLA", "DRAM", "CBRS", "AMD", "QCOM", "GOOGL", "COIN", "NATGAS", "TSM", "AMZN", "BILL", "XAU", "XAG"]))
+    print(f"其中加密货币/代币: ~{crypto_count}, 美股/ETF/商品代币: ~{len(available) - crypto_count}")
 
-    # 4. 保存可用列表到 JSON
-    with open("gateio_available_symbols.json", "w", encoding="utf-8") as f:
+    # 4. 保存
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump({
             "available": available,
-            "unavailable": unavailable,
-            "total": len(USER_SYMBOLS)
+            "unavailable": [],
+            "total": TOP_N,
+            "source": "top_{}_by_volume_24h_quote".format(TOP_N)
         }, f, ensure_ascii=False, indent=2)
-    print(f"\n可用列表已保存至 gateio_available_symbols.json")
+    print(f"\n可用列表已保存至 {CONFIG_FILE}")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import time
 import requests
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ============ 配置 ============
 BASE_URL = "https://api.gateio.ws/api/v4"
@@ -25,7 +26,7 @@ INTERVALS = {
 }
 
 KLINES_LIMIT = 50  # 取50根K线
-REQUEST_DELAY = 0.3  # 请求间隔(秒)，防限流
+REQUEST_DELAY = 0.12  # 请求间隔(秒)，防限流（并行模式下仅影响同标的连续请求）
 STATE_FILE = ".monitor_state.json"
 POSITIONS_FILE = "positions.json"
 
@@ -129,12 +130,12 @@ def check_reversal_strength(iv: Dict) -> Optional[str]:
         return f"量能放大{vol/prev_vol:.1f}x+" + "+".join(conds)
 
     if cons == 2:
-        prev2_high = iv.get("prev2_high", 0)
+        prev_high = iv.get("prev_high", 0)
         conds = []
         if close is not None and ma10 is not None and close > ma10:
             conds.append("价格>MA10")
-        if close is not None and prev2_high > 0 and close > prev2_high:
-            conds.append("价格>前二高")
+        if close is not None and prev_high > 0 and close > prev_high:
+            conds.append("价格>前高")
         if conds:
             return "+".join(conds)
         return None
@@ -194,27 +195,29 @@ class GateioFuturesMonitor:
         print(f"已加载 {len(available)} 个可用标的")
         return available
 
-    def _get(self, endpoint: str, params: Dict = None) -> Optional[Dict]:
+    def _get(self, endpoint: str, params: Dict = None, session=None) -> Optional[Dict]:
         """发送 GET 请求并返回 JSON"""
+        s = session or self.session
         url = f"{BASE_URL}{endpoint}"
         try:
-            resp = self.session.get(url, params=params, timeout=20)
+            resp = s.get(url, params=params, timeout=20)
             resp.raise_for_status()
             return resp.json()
         except requests.exceptions.RequestException as e:
             return None
 
-    def _get_list(self, endpoint: str, params: Dict = None) -> Optional[List]:
+    def _get_list(self, endpoint: str, params: Dict = None, session=None) -> Optional[List]:
         """发送 GET 请求并返回列表"""
+        s = session or self.session
         url = f"{BASE_URL}{endpoint}"
         try:
-            resp = self.session.get(url, params=params, timeout=20)
+            resp = s.get(url, params=params, timeout=20)
             resp.raise_for_status()
             return resp.json()
         except requests.exceptions.RequestException as e:
             return None
 
-    def fetch_klines(self, contract: str, interval: str, limit: int = 100) -> Optional[List[List]]:
+    def fetch_klines(self, contract: str, interval: str, limit: int = 100, session=None) -> Optional[List[List]]:
         """
         获取合约K线数据
         Gate.io futures candlesticks 返回: [[time, volume, close, high, low, open], ...]
@@ -223,12 +226,12 @@ class GateioFuturesMonitor:
             "contract": contract,
             "interval": interval,
             "limit": limit
-        })
+        }, session=session)
         return data
 
-    def fetch_ticker(self, contract: str) -> Optional[Dict]:
+    def fetch_ticker(self, contract: str, session=None) -> Optional[Dict]:
         """获取合约最新 ticker"""
-        data = self._get_list("/futures/usdt/tickers", {"contract": contract})
+        data = self._get_list("/futures/usdt/tickers", {"contract": contract}, session=session)
         if data and isinstance(data, list) and len(data) > 0:
             return data[0]
         return None
@@ -278,6 +281,106 @@ class GateioFuturesMonitor:
             return "短期下跌", consecutive_down, display_window
         else:
             return "震荡", 0, display_window
+
+    def _fetch_symbol_data(self, sym_info: Dict, session) -> Dict:
+        """获取单个标的的 ticker + 各周期 K 线数据（并行安全）"""
+        contract = sym_info["contract"]
+        user_symbol = sym_info.get("user_symbol", contract)
+        result = {"symbol": user_symbol, "contract": contract, "intervals": []}
+
+        ticker = self.fetch_ticker(contract, session=session)
+        if ticker:
+            result["last"] = float(ticker.get("last", 0))
+            result["change_pct"] = float(ticker.get("change_percentage", 0))
+        else:
+            result["last"] = None
+            result["change_pct"] = None
+        time.sleep(REQUEST_DELAY)
+
+        for interval, interval_name in INTERVALS.items():
+            klines = self.fetch_klines(contract, interval, limit=KLINES_LIMIT, session=session)
+            time.sleep(REQUEST_DELAY)
+            if not klines or len(klines) < 20:
+                result["intervals"].append({
+                    "name": interval_name,
+                    "trend": "数据不足",
+                    "consecutive": 0
+                })
+                continue
+            klines_sorted = sorted(klines, key=lambda x: int(x["t"]))
+            closes = [float(k["c"]) for k in klines_sorted]
+            ma10 = self.calculate_ma(closes, period=10)
+            valid_ma = [v for v in ma10 if v is not None]
+            trend, consecutive, _ = self.analyze_ma_trend(ma10, min_consecutive=3)
+
+            cur_k = klines_sorted[-1]
+            prev_k = klines_sorted[-2] if len(klines_sorted) >= 2 else None
+            prev2_k = klines_sorted[-3] if len(klines_sorted) >= 3 else None
+            volume = float(cur_k["v"])
+            prev_volume = float(prev_k["v"]) if prev_k else 0
+            prev_high = float(prev_k["h"]) if prev_k else 0
+            prev2_high = float(prev2_k["h"]) if prev2_k else 0
+
+            reversal_pct = None
+            if 1 <= consecutive <= 3 and trend not in ("数据不足", "震荡"):
+                if len(closes) >= consecutive + 2:
+                    start_close = closes[-consecutive - 1]
+                    if start_close != 0:
+                        reversal_pct = (closes[-1] - start_close) / start_close * 100
+
+            result["intervals"].append({
+                "name": interval_name,
+                "trend": trend,
+                "consecutive": consecutive,
+                "reversal_pct": round(reversal_pct, 2) if reversal_pct is not None else None,
+                "close": round(closes[-1], 4),
+                "ma10": round(valid_ma[-1], 4) if valid_ma else None,
+                "volume": round(volume, 2),
+                "prev_volume": round(prev_volume, 2),
+                "prev_high": round(prev_high, 4),
+                "prev2_high": round(prev2_high, 4)
+            })
+        return result
+
+    def _print_symbol_result(self, info: Dict):
+        """打印已获取的单个标的分析结果（不发起网络请求）"""
+        contract = info["contract"]
+        user_symbol = info.get("user_symbol", contract)
+
+        print(f"\n【{user_symbol} ({contract})】")
+        print("-" * 60)
+
+        if info.get("last"):
+            change_pct = info.get("change_pct", 0)
+            print(f"  最新价: {info['last']:,.4f}  24h涨跌: {change_pct:+.2f}%")
+
+        for iv in info.get("intervals", []):
+            iv_name = iv["name"]
+            trend = iv.get("trend", "数据不足")
+            consecutive = iv.get("consecutive", 0)
+            close = iv.get("close")
+            ma10 = iv.get("ma10")
+
+            print(f"\n  [{iv_name}]")
+            if trend == "数据不足":
+                print(f"    数据不足")
+                continue
+            print(f"    最新价: {close:,.4f}" if close else "    最新价: N/A")
+            print(f"    MA10: {ma10:,.4f}" if ma10 else "    MA10: N/A")
+
+            if trend == "连续上涨":
+                print(f"    趋势: >>> 【{trend}】 <<<  已连续 {consecutive} 周期")
+            elif trend == "连续下跌":
+                print(f"    趋势: >>> 【{trend}】 <<<  已连续 {consecutive} 周期")
+            elif "上涨" in trend or "下跌" in trend:
+                print(f"    趋势: 【{trend}】 ({consecutive} 周期)")
+            else:
+                print(f"    趋势: 【{trend}】")
+
+            if close and ma10:
+                deviation = (close - ma10) / ma10 * 100
+                pos = "上方" if deviation > 0 else "下方"
+                print(f"    偏离: {deviation:+.2f}% (价格在MA10{pos})")
 
     def analyze_symbol(self, symbol_info: Dict):
         """分析单个标的的全部周期"""
@@ -362,67 +465,29 @@ class GateioFuturesMonitor:
         print("      股权代币合约价格与真实股价存在 2-4% 溢价，趋势方向一致")
         print("=" * 70)
 
-        results = []
-        for i, sym_info in enumerate(self.symbols, 1):
-            print(f"\n[{i}/{len(self.symbols)}]", end="")
-            contract = sym_info["contract"]
-            user_symbol = sym_info.get("user_symbol", contract)
-            result = {"symbol": user_symbol, "contract": contract, "intervals": []}
+        total = len(self.symbols)
+        results = [None] * total
 
-            ticker = self.fetch_ticker(contract)
-            if ticker:
-                result["last"] = float(ticker.get("last", 0))
-                result["change_pct"] = float(ticker.get("change_percentage", 0))
-            else:
-                result["last"] = None
-                result["change_pct"] = None
-            time.sleep(REQUEST_DELAY)
+        def process_one(idx_sym):
+            idx, sym_info = idx_sym
+            session = requests.Session()
+            data = self._fetch_symbol_data(sym_info, session)
+            session.close()
+            print(f"\r  获取进度: {idx + 1}/{total} {data['symbol']}", end="", flush=True)
+            return idx, data
 
-            for interval, interval_name in INTERVALS.items():
-                klines = self.fetch_klines(contract, interval, limit=KLINES_LIMIT)
-                time.sleep(REQUEST_DELAY)
-                if not klines or len(klines) < 20:
-                    result["intervals"].append({
-                        "name": interval_name,
-                        "trend": "数据不足",
-                        "consecutive": 0
-                    })
-                    continue
-                klines_sorted = sorted(klines, key=lambda x: int(x["t"]))
-                closes = [float(k["c"]) for k in klines_sorted]
-                ma10 = self.calculate_ma(closes, period=10)
-                valid_ma = [v for v in ma10 if v is not None]
-                trend, consecutive, _ = self.analyze_ma_trend(ma10, min_consecutive=3)
+        workers = min(8, max(3, total // 10))
+        print(f"\n  正在并行获取数据 ({workers} 线程)...")
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(process_one, (i, s)): i for i, s in enumerate(self.symbols)}
+            for future in as_completed(futures):
+                idx, data = future.result()
+                results[idx] = data
+        print("\n  数据获取完成。\n")
 
-                cur_k = klines_sorted[-1]
-                prev_k = klines_sorted[-2] if len(klines_sorted) >= 2 else None
-                prev2_k = klines_sorted[-3] if len(klines_sorted) >= 3 else None
-                volume = float(cur_k["v"])
-                prev_volume = float(prev_k["v"]) if prev_k else 0
-                prev_high = float(prev_k["h"]) if prev_k else 0
-                prev2_high = float(prev2_k["h"]) if prev2_k else 0
-
-                reversal_pct = None
-                if 1 <= consecutive <= 3 and trend not in ("数据不足", "震荡"):
-                    if len(closes) >= consecutive + 2:
-                        start_close = closes[-consecutive - 1]
-                        if start_close != 0:
-                            reversal_pct = (closes[-1] - start_close) / start_close * 100
-
-                result["intervals"].append({
-                    "name": interval_name,
-                    "trend": trend,
-                    "consecutive": consecutive,
-                    "reversal_pct": round(reversal_pct, 2) if reversal_pct is not None else None,
-                    "close": round(closes[-1], 4),
-                    "ma10": round(valid_ma[-1], 4) if valid_ma else None,
-                    "volume": round(volume, 2),
-                    "prev_volume": round(prev_volume, 2),
-                    "prev_high": round(prev_high, 4),
-                    "prev2_high": round(prev2_high, 4)
-                })
-            results.append(result)
-            self.analyze_symbol(sym_info)
+        results = [r for r in results if r is not None]
+        for r in results:
+            self._print_symbol_result(r)
 
         # 转折预警检测
         prev_state = load_state()
