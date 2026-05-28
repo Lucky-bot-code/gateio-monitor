@@ -346,7 +346,7 @@ def print_banner():
    +=======================================================+
    |                                                       |
    |     G A T E . I O   M A 1 0   M O N I T O R         |
-   |              Protocol v1.3.2  //  ONLINE                |
+   |              Protocol v1.4.1  //  ONLINE                |
    |                                                       |
    +=======================================================+
 """)
@@ -474,9 +474,11 @@ class MonitorCore:
             result["mark_price"] = float(ticker.get("mark_price", 0))
             result["index_price"] = float(ticker.get("index_price", 0))
             result["funding_rate"] = float(ticker.get("funding_rate", 0))
+            result["volume_24h"] = float(ticker.get("volume_24h_quote", 0) or 0)
         else:
             result["last"] = None
             result["change_pct"] = None
+            result["volume_24h"] = None
 
         time.sleep(REQUEST_DELAY)
 
@@ -819,6 +821,14 @@ HTML_TEMPLATE = """
         }
         .search-input:focus { border-color: var(--accent); }
         .search-input::placeholder { color: var(--text-secondary); }
+        .sort-select {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 8px; padding: 8px 12px;
+            color: var(--text-primary); font-size: 0.85rem;
+            outline: none; cursor: pointer;
+            min-width: 140px;
+        }
+        .sort-select:focus { border-color: var(--accent); }
         .search-count { font-size: 0.8rem; color: var(--text-secondary); white-space: nowrap; }
         .stats-bar {
             display: flex;
@@ -889,6 +899,7 @@ HTML_TEMPLATE = """
         .card-price .change { font-size: 0.8rem; margin-top: 2px; }
         .change-up { color: var(--up); }
         .change-down { color: var(--down); }
+        .card-price .volume { font-size: 0.7rem; color: var(--text-secondary); margin-top: 2px; }
         .intervals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
         @media (max-width: 560px) { .intervals { grid-template-columns: repeat(2, 1fr); } }
         @media (max-width: 400px) { .intervals { grid-template-columns: 1fr; } }
@@ -1111,6 +1122,13 @@ HTML_TEMPLATE = """
         <div id="errorBox" class="error-box" style="display:none"></div>
         <div class="search-bar" id="searchBar" style="display:none">
             <input type="text" id="searchInput" class="search-input" placeholder="搜索合约...">
+            <select id="sortSelect" class="sort-select" onchange="onSortChange()">
+                <option value="position">排序: 持仓优先</option>
+                <option value="volume_desc">成交额: 高→低</option>
+                <option value="volume_asc">成交额: 低→高</option>
+                <option value="change_desc">涨跌幅: 高→低</option>
+                <option value="change_asc">涨跌幅: 低→高</option>
+            </select>
             <span class="search-count" id="searchCount"></span>
         </div>
         <div id="grid" class="grid" style="display:none"></div>
@@ -1138,6 +1156,7 @@ HTML_TEMPLATE = """
         let dataCache = null;
         let alertsCache = [];
         let currentSearchQuery = '';
+        let currentSort = 'position';
 
         function applyFilter() {
             var query = currentSearchQuery;
@@ -1152,6 +1171,13 @@ HTML_TEMPLATE = """
             var countEl = document.getElementById('searchCount');
             if (countEl) {
                 countEl.textContent = '显示 ' + visibleCount + ' / ' + cards.length + ' 个标的';
+            }
+        }
+
+        function onSortChange() {
+            currentSort = document.getElementById('sortSelect').value;
+            if (dataCache) {
+                renderCards(dataCache, alertsCache);
             }
         }
         const POSITIONS_KEY = 'ma10_positions';
@@ -1350,6 +1376,36 @@ HTML_TEMPLATE = """
             savePositions(positions);
             updateCardPositionDOM(symbol, newPos);
 
+            // 按持仓权重 + 当前排序选项重新排列 DOM
+            var card = document.getElementById('card-' + symbol);
+            if (card) {
+                var grid = document.getElementById('grid');
+                var allCards = Array.from(grid.querySelectorAll('.card'));
+                var symData = {};
+                if (dataCache) { dataCache.forEach(function(d) { symData[d.symbol] = d; }); }
+                var posWeight = function(p) { return p === 'short' ? 2 : (p === 'long' ? 1 : 0); };
+                allCards.sort(function(a, b) {
+                    var symA = a.id.replace('card-', '');
+                    var symB = b.id.replace('card-', '');
+                    var pa = posWeight(positions[symA] || null);
+                    var pb = posWeight(positions[symB] || null);
+                    if (pa !== pb) return pb - pa;
+                    var da = symData[symA], db = symData[symB];
+                    var va = (da && da.volume_24h) || 0;
+                    var vb = (db && db.volume_24h) || 0;
+                    var ca = (da && da.change_pct) || 0;
+                    var cb = (db && db.change_pct) || 0;
+                    switch (currentSort) {
+                        case 'volume_desc': return vb - va;
+                        case 'volume_asc': return va - vb;
+                        case 'change_desc': return cb - ca;
+                        case 'change_asc': return ca - cb;
+                        default: return 0;
+                    }
+                });
+                allCards.forEach(function(c) { grid.appendChild(c); });
+            }
+
             fetch('/api/position', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1398,6 +1454,14 @@ HTML_TEMPLATE = """
             return price.toFixed(6);
         }
 
+        function formatVolume(vol) {
+            if (vol === null || vol === undefined || vol === 0) return '-';
+            if (vol >= 1e9) return (vol / 1e9).toFixed(2) + 'B';
+            if (vol >= 1e6) return (vol / 1e6).toFixed(2) + 'M';
+            if (vol >= 1e3) return (vol / 1e3).toFixed(2) + 'K';
+            return vol.toFixed(2);
+        }
+
         function sparklineSvg(data, trendClass) {
             if (!data || data.length < 2) return '';
             const vals = data.map(Number);
@@ -1437,10 +1501,25 @@ HTML_TEMPLATE = """
                 symDivergence[d.symbol].push(d);
             });
 
-            // 有持仓的卡片置顶 (short > long > 无)
+            // 有持仓的卡片置顶 (short > long > 无), 组内按当前排序选项排列
             const posWeight = (p) => p === 'short' ? 2 : (p === 'long' ? 1 : 0);
             const sortedData = [...data].sort((a, b) => {
-                return posWeight(positions[b.symbol]) - posWeight(positions[a.symbol]);
+                var pa = posWeight(positions[a.symbol] || null);
+                var pb = posWeight(positions[b.symbol] || null);
+                // 先按持仓分组
+                if (pa !== pb) return pb - pa;
+                // 组内按选定排序
+                var va = a.volume_24h || 0;
+                var vb = b.volume_24h || 0;
+                var ca = a.change_pct || 0;
+                var cb = b.change_pct || 0;
+                switch (currentSort) {
+                    case 'volume_desc': return vb - va;
+                    case 'volume_asc': return va - vb;
+                    case 'change_desc': return cb - ca;
+                    case 'change_asc': return ca - cb;
+                    default: return 0; // position: 保持原始顺序
+                }
             });
 
             sortedData.forEach(item => {
@@ -1522,6 +1601,7 @@ HTML_TEMPLATE = """
                             <div class="card-price">
                                 <div class="last">${formatPrice(item.last)}</div>
                                 <div class="change ${changeClass}">${changeSign}${item.change_pct !== null ? item.change_pct.toFixed(2) : '-'}%</div>
+                                <div class="volume">24h: ${formatVolume(item.volume_24h)}</div>
                             </div>
                         </div>
                         <div class="intervals">${intervalsHtml}</div>
