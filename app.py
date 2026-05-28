@@ -346,7 +346,7 @@ def print_banner():
    +=======================================================+
    |                                                       |
    |     G A T E . I O   M A 1 0   M O N I T O R         |
-   |              Protocol v1.4.1  //  ONLINE                |
+   |              Protocol v1.4.2  //  ONLINE                |
    |                                                       |
    +=======================================================+
 """)
@@ -707,6 +707,9 @@ def refresh_data():
         cache["error"] = str(e)
     finally:
         cache["updating"] = False
+        # 刷新完成后立即计算下一次调度时间，供前端倒计时同步
+        global _next_refresh_at
+        _next_refresh_at = time.time() + _next_refresh_delay()
         global _browser_opened
         if not _browser_opened:
             _browser_opened = True
@@ -743,7 +746,7 @@ def auto_refresh_loop():
         _next_refresh_at = time.time() + delay  # 刷新即将开始
         time.sleep(delay)
         refresh_data()
-        _next_refresh_at = time.time()  # 刷新完成，前端可立即拉取
+        # _next_refresh_at 已由 refresh_data() 内部更新为下一次调度时间
 
 
 # ============ HTML模板 ============
@@ -1694,7 +1697,7 @@ HTML_TEMPLATE = """
                 renderCards(dataCache, alertsCache);
                 document.getElementById('updateInfo').textContent = '更新于: ' + payload.last_update;
                 document.getElementById('errorBox').style.display = 'none';
-                countdownRemaining = payload.next_refresh_in || 300;
+                countdownRemaining = (payload.next_refresh_in != null) ? Math.ceil(payload.next_refresh_in) : 300;
                 // 如果当前在背离页面，同步刷新
                 if (document.getElementById('view-divergence').classList.contains('active')) {
                     renderDivergence(divergenceCache);
@@ -1750,6 +1753,19 @@ HTML_TEMPLATE = """
                     loadData().finally(() => { isReloading = false; });
                 }
             }, 1000);
+            // 每 30 秒与服务器同步倒计时，防止 JS 定时器漂移
+            setInterval(async () => {
+                try {
+                    const res = await fetch('/api/data');
+                    const payload = await res.json();
+                    if (payload.next_refresh_in != null) {
+                        countdownRemaining = Math.ceil(payload.next_refresh_in);
+                    }
+                    if (!payload.updating && payload.last_update !== document.getElementById('updateInfo').textContent.replace('更新于: ', '')) {
+                        loadData();
+                    }
+                } catch (e) {}
+            }, 30000);
         }
 
         document.getElementById('searchInput').addEventListener('input', function() {

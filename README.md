@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-2.0%2B-green)](https://flask.palletsprojects.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-v1.4.1-brightgreen)](.)
+[![Version](https://img.shields.io/badge/Version-v1.4.2-brightgreen)](.)
 
 ---
 
@@ -229,6 +229,7 @@ WECOM_WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的
 
 | 日期 | 版本 | 内容 |
 |------|------|------|
+| 2026-05-28 | v1.4.2 | 修复前端倒计时与后端刷新调度脱节问题（`next_refresh_in` 始终为0导致倒计时重置为300s），新增30秒服务器同步机制 |
 | 2026-05-28 | v1.4.1 | 24h成交额卡片展示 + 多维度排序（成交额/涨跌幅）+ 修复持仓切换后卡片不置顶的排序bug |
 | 2026-05-27 | v1.4 | 标的扩展至成交额前100、并行数据获取（5~8线程，提速65%+）、实时搜索过滤、持仓下拉选择、转折预警强度条件优化 |
 | 2026-05-26 | v1.3.2 | 转折预警调度精确到第59分钟（日K 7:59 / 4H 各边界59分 / 1H 每时59分），避免提前触发 |
