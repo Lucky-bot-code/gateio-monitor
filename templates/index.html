@@ -1,0 +1,1653 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gate.io MA10 趋势监控面板</title>
+    <style>
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --up: #10b981;
+            --up-bg: #064e3b;
+            --down: #ef4444;
+            --down-bg: #7f1d1d;
+            --neutral: #6b7280;
+            --neutral-bg: #374151;
+            --border: #475569;
+            --accent: #3b82f6;
+            --skeleton-shine: rgba(255,255,255,0.05);
+        }
+        :root[data-theme="light"] {
+            --bg-primary: #f8fafc;
+            --bg-secondary: #ffffff;
+            --bg-card: #f1f5f9;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --neutral: #94a3b8;
+            --neutral-bg: #e2e8f0;
+            --border: #e2e8f0;
+            --skeleton-shine: rgba(0,0,0,0.06);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding-bottom: 60px;
+        }
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 20px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .header h1 { font-size: 1.1rem; color: var(--text-primary); }
+        .header .subtitle { font-size: 0.7rem; color: var(--text-secondary); margin-top: 2px; }
+        .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .update-info { font-size: 0.72rem; color: var(--text-secondary); }
+        .btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: opacity 0.2s;
+            white-space: nowrap;
+        }
+        .btn:hover { opacity: 0.9; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-sm { padding: 4px 10px; font-size: 0.7rem; }
+        .btn-icon {
+            background: transparent; border: 1px solid var(--border);
+            color: var(--text-secondary); padding: 4px 8px;
+            border-radius: 4px; cursor: pointer; font-size: 0.8rem;
+        }
+        .btn-icon:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+        .countdown { font-size: 0.72rem; color: var(--text-secondary); min-width: 70px; text-align: right; }
+        .connection-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+        .connection-dot.live { background: var(--up); }
+        .connection-dot.poll { background: #f59e0b; }
+        .search-bar {
+            display: flex; align-items: center; gap: 10px;
+            margin-bottom: 12px; flex-wrap: wrap;
+        }
+        .search-input {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 8px; padding: 8px 12px;
+            color: var(--text-primary); font-size: 0.85rem;
+            width: 240px; max-width: 100%; outline: none;
+            transition: border-color 0.2s;
+        }
+        .search-input:focus { border-color: var(--accent); }
+        .search-input::placeholder { color: var(--text-secondary); }
+        .sort-select {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 8px; padding: 7px 10px;
+            color: var(--text-primary); font-size: 0.8rem;
+            outline: none; cursor: pointer; min-width: 130px;
+        }
+        .sort-select:focus { border-color: var(--accent); }
+        .search-count { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; }
+        .stats-bar {
+            display: flex; gap: 14px; padding: 10px 20px;
+            background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+            overflow-x: auto; font-size: 0.75rem;
+        }
+        .stats-bar .stat { white-space: nowrap; }
+        .stats-bar .stat span { color: var(--text-secondary); }
+        .container { padding: 14px 20px; max-width: 1400px; margin: 0 auto; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+        @media (max-width: 480px) {
+            .grid { grid-template-columns: 1fr; }
+            .header h1 { font-size: 0.95rem; }
+            .container { padding: 10px 12px; }
+        }
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
+        }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+        .card-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 10px; padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+        .card-title { font-size: 1.05rem; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+        .card-pos {
+            cursor: pointer; font-size: 0.8rem; font-weight: 700;
+            width: 26px; height: 26px; border-radius: 5px;
+            display: inline-flex; align-items: center; justify-content: center;
+            border: 1px solid var(--border); color: var(--text-secondary);
+            transition: all 0.2s; user-select: none; background: transparent;
+        }
+        .card-pos:hover { transform: scale(1.1); border-color: var(--text-secondary); }
+        .card-pos.long { background: var(--up-bg); color: var(--up); border-color: var(--up); }
+        .card-pos.short { background: var(--down-bg); color: var(--down); border-color: var(--down); }
+        .card.long { border-color: var(--up); box-shadow: 0 0 0 1px var(--up), 0 8px 24px rgba(16,185,129,0.12); }
+        .card.short { border-color: var(--down); box-shadow: 0 0 0 1px var(--down), 0 8px 24px rgba(239,68,68,0.12); }
+        .pos-dropdown {
+            position: fixed; z-index: 200;
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 8px; padding: 4px;
+            display: flex; flex-direction: column; gap: 2px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4); min-width: 70px;
+        }
+        .pos-dropdown-option {
+            padding: 8px 16px; border-radius: 4px;
+            cursor: pointer; font-size: 0.85rem; font-weight: 600;
+            text-align: center; border: none; background: transparent;
+            color: var(--text-secondary); transition: background 0.15s;
+            white-space: nowrap;
+        }
+        .pos-dropdown-option:hover { background: var(--bg-card); }
+        .pos-dropdown-option.long { color: var(--up); }
+        .pos-dropdown-option.short { color: var(--down); }
+        .pos-dropdown-option.active { background: var(--bg-card); outline: 1px solid var(--border); }
+        .card-price { text-align: right; }
+        .card-price .last { font-size: 1rem; font-weight: 600; }
+        .card-price .change { font-size: 0.75rem; margin-top: 1px; }
+        .change-up { color: var(--up); }
+        .change-down { color: var(--down); }
+        .card-price .volume { font-size: 0.68rem; color: var(--text-secondary); margin-top: 2px; }
+        .intervals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+        @media (max-width: 560px) { .intervals { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 400px) { .intervals { grid-template-columns: 1fr; } }
+        .interval-item {
+            border-radius: 8px; padding: 8px 6px; text-align: center;
+            border: 1px solid transparent; overflow: hidden;
+        }
+        .interval-item .name { font-size: 0.65rem; color: var(--text-secondary); margin-bottom: 2px; }
+        .interval-item .trend { font-size: 0.75rem; font-weight: 600; margin-bottom: 1px; }
+        .interval-item .detail { font-size: 0.65rem; color: var(--text-secondary); }
+        .interval-item .indicators { font-size: 0.6rem; color: var(--text-secondary); margin-top: 2px; line-height: 1.3; }
+        .interval-item .indicators .ind-up { color: var(--up); }
+        .interval-item .indicators .ind-down { color: var(--down); }
+        .trend-up { background: var(--up-bg); border-color: var(--up); }
+        .trend-up .trend { color: var(--up); }
+        .trend-down { background: var(--down-bg); border-color: var(--down); }
+        .trend-down .trend { color: var(--down); }
+        .trend-neutral { background: var(--neutral-bg); border-color: var(--neutral); }
+        .trend-neutral .trend { color: var(--text-secondary); }
+        .trend-up-short { background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); }
+        .trend-up-short .trend { color: var(--up); }
+        .trend-down-short { background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.4); }
+        .trend-down-short .trend { color: var(--down); }
+        .loading {
+            display: flex; justify-content: center; align-items: center; height: 60vh;
+            flex-direction: column; gap: 14px; color: var(--text-secondary);
+        }
+        .spinner {
+            width: 36px; height: 36px; border: 3px solid var(--border);
+            border-top-color: var(--accent); border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .error-box {
+            background: var(--down-bg); color: var(--down);
+            padding: 14px; border-radius: 8px; margin: 20px;
+            border: 1px solid var(--down);
+        }
+        .alert-bar {
+            display: none; padding: 10px 20px; gap: 8px;
+            flex-wrap: wrap; align-items: center;
+        }
+        .alert-bar.active { display: flex; }
+        .alert-bar.alert-down { background: rgba(220, 38, 38, 0.15); border-bottom: 1px solid rgba(220, 38, 38, 0.3); }
+        .alert-bar.alert-up { background: rgba(5, 150, 105, 0.15); border-bottom: 1px solid rgba(5, 150, 105, 0.3); }
+        .alert-bar.alert-mixed { background: rgba(59, 130, 246, 0.15); border-bottom: 1px solid rgba(59, 130, 246, 0.3); }
+        .alert-badge {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 3px 9px; border-radius: 5px;
+            font-size: 0.7rem; font-weight: 600;
+            cursor: pointer; transition: opacity 0.2s, transform 0.2s;
+        }
+        .alert-badge:hover { opacity: 0.85; transform: translateY(-1px); }
+        .alert-badge.down { background: var(--down-bg); color: var(--down); border: 1px solid var(--down); }
+        .alert-badge.up { background: var(--up-bg); color: var(--up); border: 1px solid var(--up); }
+        .card-alert {
+            margin-bottom: 8px; padding: 6px 9px; border-radius: 5px;
+            font-size: 0.7rem; font-weight: 600;
+            display: flex; align-items: center; gap: 5px;
+        }
+        .card-alert.down { background: rgba(220, 38, 38, 0.2); color: #fca5a5; border: 1px solid rgba(220, 38, 38, 0.4); }
+        .card-alert.up { background: rgba(5, 150, 105, 0.2); color: #6ee7b7; border: 1px solid rgba(5, 150, 105, 0.4); }
+        .tabs {
+            display: flex; gap: 0;
+            background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+            padding: 0 20px;
+        }
+        .tab {
+            padding: 9px 18px; font-size: 0.82rem; font-weight: 600;
+            color: var(--text-secondary); cursor: pointer;
+            border-bottom: 2px solid transparent; transition: all 0.2s;
+            background: none; border-top: none; border-left: none; border-right: none;
+        }
+        .tab:hover { color: var(--text-primary); }
+        .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+        .view { display: none; }
+        .view.active { display: block; }
+        .divergence-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; padding: 14px 20px; max-width: 1400px; margin: 0 auto; }
+        @media (max-width: 480px) { .divergence-grid { grid-template-columns: 1fr; } }
+        .divergence-card {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 12px; padding: 14px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .divergence-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+        .divergence-card.buy { border-color: var(--up); box-shadow: 0 0 0 1px var(--up), 0 8px 24px rgba(16,185,129,0.12); }
+        .divergence-card.sell { border-color: var(--down); box-shadow: 0 0 0 1px var(--down), 0 8px 24px rgba(239,68,68,0.12); }
+        .divergence-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .divergence-symbol { font-size: 1.05rem; font-weight: 600; }
+        .divergence-signal {
+            padding: 3px 10px; border-radius: 5px; font-size: 0.75rem; font-weight: 700;
+        }
+        .divergence-signal.buy { background: var(--up-bg); color: var(--up); border: 1px solid var(--up); }
+        .divergence-signal.sell { background: var(--down-bg); color: var(--down); border: 1px solid var(--down); }
+        .divergence-detail { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6; }
+        .divergence-detail .hl { color: var(--text-primary); font-weight: 600; }
+        .divergence-empty { text-align: center; color: var(--text-secondary); padding: 60px 20px; }
+        .divergence-desc {
+            padding: 10px 20px; background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            font-size: 0.75rem; color: var(--text-secondary);
+            max-width: 1400px; margin: 0 auto;
+        }
+        .tab-badge {
+            display: inline-flex; align-items: center; justify-content: center;
+            min-width: 18px; height: 18px; padding: 0 5px;
+            border-radius: 9px; font-size: 0.65rem; font-weight: 700;
+            margin-left: 4px; vertical-align: middle;
+        }
+        .tab-badge.buy { background: var(--up-bg); color: var(--up); }
+        .tab-badge.sell { background: var(--down-bg); color: var(--down); }
+        .tab-badge.mixed { background: var(--accent); color: white; }
+        .card-div-badge {
+            display: inline-flex; align-items: center; gap: 2px;
+            padding: 2px 6px; border-radius: 4px; font-size: 0.6rem;
+            font-weight: 700; cursor: pointer; margin-left: 4px;
+            transition: opacity 0.2s; vertical-align: middle;
+        }
+        .card-div-badge:hover { opacity: 0.85; }
+        .card-div-badge.buy { background: var(--up-bg); color: var(--up); border: 1px solid var(--up); }
+        .card-div-badge.sell { background: var(--down-bg); color: var(--down); border: 1px solid var(--down); }
+        .card-chart-icon {
+            position: absolute; top: 10px; right: 10px;
+            font-size: 0.7rem; color: var(--text-secondary);
+            cursor: pointer; opacity: 0; transition: opacity 0.2s;
+            background: var(--bg-card); border-radius: 4px; padding: 2px 6px;
+        }
+        .card:hover .card-chart-icon { opacity: 1; }
+
+        /* Skeleton */
+        .skeleton-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+        @media (max-width: 480px) { .skeleton-grid { grid-template-columns: 1fr; } }
+        .skeleton-card {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 12px; padding: 14px; height: 170px;
+            animation: shimmer 1.5s infinite;
+        }
+        @keyframes shimmer {
+            0% { opacity: 0.5; } 50% { opacity: 0.8; } 100% { opacity: 0.5; }
+        }
+
+        /* Chart Modal */
+        .modal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7); z-index: 500;
+            display: none; align-items: center; justify-content: center;
+        }
+        .modal.active { display: flex; }
+        .modal-content {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 12px; width: 92%; max-width: 900px;
+            max-height: 90vh; overflow-y: auto;
+        }
+        .modal-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 16px; border-bottom: 1px solid var(--border);
+            flex-wrap: wrap; gap: 8px;
+        }
+        .modal-title { font-weight: 600; font-size: 1rem; }
+        .modal-interval-tabs { display: flex; gap: 4px; }
+        .iv-btn {
+            padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border);
+            background: transparent; color: var(--text-secondary);
+            cursor: pointer; font-size: 0.72rem; font-weight: 600;
+        }
+        .iv-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+        .modal-close {
+            background: none; border: none; color: var(--text-secondary);
+            font-size: 1.4rem; cursor: pointer; padding: 0 4px;
+        }
+        .modal-close:hover { color: var(--text-primary); }
+        #chartContainer { width: 100%; height: 400px; }
+        .modal-indicators {
+            display: flex; gap: 14px; padding: 10px 16px;
+            border-top: 1px solid var(--border); flex-wrap: wrap;
+            font-size: 0.75rem;
+        }
+        .modal-indicators label {
+            display: flex; align-items: center; gap: 4px;
+            cursor: pointer; color: var(--text-secondary);
+        }
+        .modal-indicators label input { accent-color: var(--accent); }
+
+        /* Theme toggle */
+        .theme-toggle {
+            background: transparent; border: 1px solid var(--border);
+            border-radius: 20px; padding: 4px 8px; cursor: pointer;
+            color: var(--text-secondary); font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        .theme-toggle:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+
+        /* Bottom nav (mobile) */
+        .bottom-nav {
+            display: none; position: fixed; bottom: 0; left: 0; right: 0;
+            background: var(--bg-secondary); border-top: 1px solid var(--border);
+            z-index: 100; padding: 6px 0 env(safe-area-inset-bottom, 0);
+        }
+        @media (max-width: 640px) {
+            .bottom-nav { display: flex; justify-content: space-around; }
+            body { padding-bottom: 70px; }
+        }
+        .nav-item {
+            display: flex; flex-direction: column; align-items: center; gap: 2px;
+            background: none; border: none; color: var(--text-secondary);
+            cursor: pointer; padding: 6px 12px; font-size: 0.6rem;
+            transition: color 0.2s;
+        }
+        .nav-item.active { color: var(--accent); }
+        .nav-item .nav-icon { font-size: 1.1rem; }
+
+        /* Symbol manager */
+        .symbol-manager {
+            padding: 14px 20px; max-width: 1400px; margin: 0 auto;
+        }
+        .symbol-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+        .symbol-tag {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 3px 9px; border-radius: 14px;
+            background: var(--bg-card); border: 1px solid var(--border);
+            font-size: 0.72rem; color: var(--text-primary);
+        }
+        .symbol-tag .remove {
+            cursor: pointer; color: var(--down); font-weight: 700;
+            font-size: 0.9rem; line-height: 1;
+        }
+        .symbol-tag .remove:hover { opacity: 0.7; }
+        .add-symbol-row { display: flex; gap: 8px; margin-bottom: 10px; }
+
+        /* Keyboard hint */
+        .kbd { display: inline-block; padding: 1px 5px; border-radius: 3px;
+            background: var(--bg-card); border: 1px solid var(--border);
+            font-size: 0.65rem; font-family: monospace; color: var(--text-secondary); }
+
+        /* Price alert */
+        .price-alert-bell {
+            cursor: pointer; font-size: 0.75rem; padding: 2px 4px;
+            border-radius: 4px; transition: all 0.2s; user-select: none;
+            background: transparent; border: 1px solid transparent;
+            display: inline-flex; align-items: center;
+        }
+        .price-alert-bell:hover { border-color: var(--border); background: var(--bg-card); }
+        .price-alert-bell.has-alerts { color: #f59e0b; }
+        .price-alert-bell.triggered { color: var(--down); animation: pulse 1s ease-in-out infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .price-alert-popup {
+            position: fixed; z-index: 200;
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 10px; padding: 10px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4); min-width: 200px;
+        }
+        .price-alert-popup .title { font-size: 0.75rem; font-weight: 600; margin-bottom: 8px; color: var(--text-primary); }
+        .price-alert-popup .rule-row {
+            display: flex; align-items: center; gap: 4px; margin-bottom: 4px;
+            font-size: 0.72rem;
+        }
+        .price-alert-popup .rule-row.triggered { opacity: 0.5; text-decoration: line-through; }
+        .price-alert-popup .add-row { display: flex; gap: 4px; margin-top: 8px; }
+        .price-alert-popup input {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 4px; padding: 4px 6px; color: var(--text-primary);
+            font-size: 0.72rem; width: 80px; outline: none;
+        }
+        .price-alert-popup select {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 4px; padding: 4px; color: var(--text-primary);
+            font-size: 0.7rem; outline: none;
+        }
+        .price-alert-popup .rule-remove {
+            cursor: pointer; color: var(--down); font-size: 0.8rem;
+            margin-left: auto; border: none; background: none;
+        }
+        .card-price-alerts {
+            display: flex; gap: 3px; flex-wrap: wrap; margin-top: 3px;
+        }
+        .card-price-tag {
+            font-size: 0.6rem; padding: 1px 5px; border-radius: 3px;
+            font-weight: 600;
+        }
+        .card-price-tag.above { background: rgba(16,185,129,0.15); color: var(--up); }
+        .card-price-tag.below { background: rgba(239,68,68,0.15); color: var(--down); }
+        .card-price-tag.triggered { opacity: 0.6; text-decoration: line-through; }
+
+        /* Symbol manager */
+        .manage-section { max-width: 600px; }
+        .manage-section h3 { font-size: 0.9rem; margin-bottom: 8px; color: var(--text-primary); }
+        .manage-section .hint { font-size: 0.72rem; color: var(--text-secondary); margin-bottom: 12px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>Gate.io U本位合约 MA10 监控</h1>
+            <div class="subtitle">Gate.io U本位永续合约市场 v2.0</div>
+        </div>
+        <div class="header-right">
+            <button class="theme-toggle" onclick="toggleTheme()" title="切换亮色/暗色主题">🌓</button>
+            <span class="update-info" id="updateInfo"><span class="connection-dot poll" id="connDot"></span>加载中...</span>
+            <button class="btn" id="refreshBtn" onclick="manualRefresh()">刷新 <span class="kbd">R</span></button>
+            <span class="countdown" id="countdown"></span>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <button class="tab active" id="tab-monitor" onclick="switchTab('monitor')">监控面板</button>
+        <button class="tab" id="tab-divergence" onclick="switchTab('divergence')">周期背离<span id="divergenceBadge" class="tab-badge" style="display:none"></span></button>
+        <button class="tab" id="tab-manage" onclick="switchTab('manage')">管理</button>
+    </div>
+
+    <div id="view-monitor" class="view active">
+    <div class="stats-bar" id="statsBar" style="display:none">
+        <div class="stat">标的数: <span id="statTotal">-</span></div>
+        <div class="stat">日K上涨: <span id="statDayUp">-</span></div>
+        <div class="stat">日K下跌: <span id="statDayDown">-</span></div>
+        <div class="stat">4h上涨: <span id="stat4hUp">-</span></div>
+        <div class="stat">4h下跌: <span id="stat4hDown">-</span></div>
+        <div class="stat">1h上涨: <span id="statHourUp">-</span></div>
+        <div class="stat">1h下跌: <span id="statHourDown">-</span></div>
+        <div class="stat">15m上涨: <span id="statMinUp">-</span></div>
+        <div class="stat">15m下跌: <span id="statMinDown">-</span></div>
+    </div>
+
+    <div class="alert-bar" id="alertBar">
+        <div style="font-weight:600; font-size:0.75rem; margin-right:6px;">转折预警:</div>
+        <div id="alertList" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+    </div>
+
+    <div class="alert-bar" id="posAlertBar">
+        <div style="font-weight:600; font-size:0.75rem; margin-right:6px; color:var(--accent);">持仓预警:</div>
+        <div id="posAlertList" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+    </div>
+
+    <div class="container">
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <div>正在加载监控数据...</div>
+        </div>
+        <div id="skeleton" class="skeleton-grid" style="display:none">
+            <div class="skeleton-card"></div><div class="skeleton-card"></div>
+            <div class="skeleton-card"></div><div class="skeleton-card"></div>
+            <div class="skeleton-card"></div><div class="skeleton-card"></div>
+            <div class="skeleton-card"></div><div class="skeleton-card"></div>
+        </div>
+        <div id="errorBox" class="error-box" style="display:none"></div>
+        <div class="search-bar" id="searchBar" style="display:none">
+            <input type="text" id="searchInput" class="search-input" placeholder="搜索 <span class='kbd'>/</span>">
+            <select id="sortSelect" class="sort-select" onchange="onSortChange()">
+                <option value="position">持仓优先</option>
+                <option value="volume_desc">成交额: 高→低</option>
+                <option value="volume_asc">成交额: 低→高</option>
+                <option value="change_desc">涨跌幅: 高→低</option>
+                <option value="change_asc">涨跌幅: 低→高</option>
+            </select>
+            <span class="search-count" id="searchCount"></span>
+        </div>
+        <div id="grid" class="grid" style="display:none"></div>
+    </div>
+    </div>
+
+    <div id="view-divergence" class="view">
+    <div class="divergence-desc">
+        大周期（日K/4h/1h）连续 ≥5 个周期同向，且相邻小周期方向相反时产生信号。
+    </div>
+    <div id="divergenceLoading" class="loading">
+        <div class="spinner"></div><div>正在分析周期背离...</div>
+    </div>
+    <div id="divergenceEmpty" class="divergence-empty" style="display:none">
+        <div style="font-size:1.1rem; margin-bottom:6px;">暂无背离信号</div>
+        <div>当前没有大周期连续 ≥5 周期且小周期反向的标的</div>
+    </div>
+    <div id="divergenceGrid" class="divergence-grid" style="display:none"></div>
+    </div>
+
+    <div id="view-manage" class="view">
+    <div class="container">
+        <div class="manage-section" style="margin-bottom:30px;">
+            <h3>添加标的</h3>
+            <div class="hint">输入 Gate.io U本位合约名称。例如: BTC_USDT 对应 BTCUSDT</div>
+            <div class="add-symbol-row">
+                <input type="text" id="newSymbolName" class="search-input" placeholder="标的名称 (如 BTCUSDT)" style="width:160px;">
+                <input type="text" id="newSymbolContract" class="search-input" placeholder="合约名 (如 BTC_USDT)" style="width:180px;">
+                <button class="btn" onclick="addSymbol()">添加</button>
+            </div>
+            <div id="manageMsg" style="font-size:0.72rem; margin-top:6px;"></div>
+        </div>
+        <div class="manage-section">
+            <h3>当前监控标的 (<span id="manageCount">0</span>)</h3>
+            <div class="symbol-tags" id="manageTags"></div>
+        </div>
+        <div class="manage-section" style="margin-top:30px;">
+            <h3>价格提醒</h3>
+            <div class="hint">为标的设置价格阈值，达到后高亮提醒。在监控面板点击卡片上的 🔔 快速设置。</div>
+            <div id="managePriceAlerts" style="font-size:0.75rem; color:var(--text-secondary); margin-top:8px;"></div>
+        </div>
+    </div>
+    </div>
+
+    <!-- Chart Modal -->
+    <div class="modal" id="chartModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title" id="modalTitle">BTCUSDT</span>
+                <div class="modal-interval-tabs">
+                    <button class="iv-btn" onclick="switchChartInterval('15m')">15m</button>
+                    <button class="iv-btn" onclick="switchChartInterval('1h')">1h</button>
+                    <button class="iv-btn" onclick="switchChartInterval('4h')">4h</button>
+                    <button class="iv-btn active" onclick="switchChartInterval('1d')">1d</button>
+                </div>
+                <button class="modal-close" onclick="closeChartModal()">&times;</button>
+            </div>
+            <div id="chartContainer"></div>
+            <div class="modal-indicators">
+                <label><input type="checkbox" checked onchange="toggleChartIndicator('ma10', this.checked)"> MA10</label>
+                <label><input type="checkbox" onchange="toggleChartIndicator('macd', this.checked)"> MACD</label>
+                <label><input type="checkbox" onchange="toggleChartIndicator('rsi', this.checked)"> RSI(14)</label>
+                <label><input type="checkbox" onchange="toggleChartIndicator('bb', this.checked)"> 布林带</label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile bottom nav -->
+    <nav class="bottom-nav">
+        <button class="nav-item active" id="nav-monitor" onclick="switchTab('monitor')">
+            <span class="nav-icon">📊</span><span class="nav-label">监控</span>
+        </button>
+        <button class="nav-item" id="nav-divergence" onclick="switchTab('divergence')">
+            <span class="nav-icon">🔄</span><span class="nav-label">背离</span>
+        </button>
+        <button class="nav-item" id="nav-manage" onclick="switchTab('manage')">
+            <span class="nav-icon">⚙️</span><span class="nav-label">管理</span>
+        </button>
+    </nav>
+
+    <script>
+        // ====== State ======
+        let countdownRemaining = 300;
+        let countdownTimer;
+        let dataCache = null;
+        let alertsCache = [];
+        let currentSearchQuery = '';
+        let currentSort = 'position';
+        const POSITIONS_KEY = 'ma10_positions';
+        let positionsCache = {};
+        let divergenceCache = null;
+        let positionAlertsCache = [];
+        let eventSource = null;
+        let sseConnected = false;
+        let pollFallbackTimer = null;
+
+        // ====== SSE ======
+        function connectSSE() {
+            if (eventSource) { eventSource.close(); }
+            try {
+                eventSource = new EventSource('/api/stream');
+                eventSource.addEventListener('update', function(e) {
+                    const payload = JSON.parse(e.data);
+                    handleServerUpdate(payload);
+                    sseConnected = true;
+                    updateConnDot();
+                    if (pollFallbackTimer) { clearInterval(pollFallbackTimer); pollFallbackTimer = null; }
+                });
+                eventSource.onerror = function() {
+                    sseConnected = false;
+                    updateConnDot();
+                    eventSource.close();
+                    if (!pollFallbackTimer) {
+                        pollFallbackTimer = setInterval(loadData, 60000);
+                    }
+                    setTimeout(connectSSE, 10000);
+                };
+                eventSource.onopen = function() {
+                    sseConnected = true;
+                    updateConnDot();
+                };
+            } catch(e) {
+                sseConnected = false;
+                updateConnDot();
+                if (!pollFallbackTimer) pollFallbackTimer = setInterval(loadData, 60000);
+            }
+        }
+
+        function updateConnDot() {
+            const dot = document.getElementById('connDot');
+            if (sseConnected) { dot.className = 'connection-dot live'; dot.title = 'SSE 实时连接'; }
+            else { dot.className = 'connection-dot poll'; dot.title = '轮询模式'; }
+        }
+
+        function handleServerUpdate(payload) {
+            if (payload.error) return;
+            dataCache = payload.data;
+            alertsCache = payload.alerts || [];
+            divergenceCache = payload.divergence || [];
+            positionAlertsCache = payload.position_alerts || [];
+            if (payload.data && payload.data.length > 0) {
+                renderCards(dataCache, alertsCache);
+                if (payload.price_alerts) {
+                    priceAlertsCache = payload.price_alerts;
+                    updateAllPriceBellStates();
+                }
+            }
+            document.getElementById('updateInfo').innerHTML = '<span class="connection-dot ' + (sseConnected ? 'live' : 'poll') + '" id="connDot"></span>更新于: ' + (payload.last_update || '-');
+            document.getElementById('errorBox').style.display = 'none';
+            if (payload.next_refresh_in != null) {
+                countdownRemaining = Math.ceil(payload.next_refresh_in);
+            }
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('skeleton').style.display = 'none';
+            if (document.getElementById('view-divergence').classList.contains('active')) {
+                renderDivergence(divergenceCache);
+            }
+        }
+
+        // ====== Theme ======
+        function toggleTheme() {
+            const root = document.documentElement;
+            const cur = root.getAttribute('data-theme');
+            const next = cur === 'light' ? 'dark' : 'light';
+            root.setAttribute('data-theme', next);
+            localStorage.setItem('theme', next);
+        }
+        (function() {
+            const saved = localStorage.getItem('theme');
+            if (saved) document.documentElement.setAttribute('data-theme', saved);
+        })();
+
+        // ====== Keyboard shortcuts ======
+        function isInputFocused() {
+            var el = document.activeElement;
+            return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT');
+        }
+        document.addEventListener('keydown', function(e) {
+            if (e.key === '/' && !isInputFocused()) {
+                e.preventDefault();
+                document.getElementById('searchInput').focus();
+            }
+            if (e.key === 'Escape') {
+                closeChartModal();
+                document.getElementById('searchInput').blur();
+            }
+            if (e.key === 'r' && !isInputFocused() && !e.ctrlKey && !e.metaKey) {
+                manualRefresh();
+            }
+        });
+
+        // ====== Filter / Sort ======
+        function applyFilter() {
+            var query = currentSearchQuery;
+            var cards = document.querySelectorAll('#grid .card');
+            var visibleCount = 0;
+            cards.forEach(function(card) {
+                var symbol = card.id.replace('card-', '').toLowerCase();
+                var match = !query || symbol.indexOf(query) !== -1;
+                card.style.display = match ? '' : 'none';
+                if (match) visibleCount++;
+            });
+            var countEl = document.getElementById('searchCount');
+            if (countEl) countEl.textContent = '显示 ' + visibleCount + ' / ' + cards.length + ' 个标的';
+        }
+
+        function onSortChange() {
+            currentSort = document.getElementById('sortSelect').value;
+            if (dataCache) renderCards(dataCache, alertsCache);
+        }
+
+        // ====== Tabs ======
+        function switchTab(name) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            document.getElementById('tab-' + name).classList.add('active');
+            document.getElementById('view-' + name).classList.add('active');
+            // Mobile nav
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            var navEl = document.getElementById('nav-' + name);
+            if (navEl) navEl.classList.add('active');
+            if (name === 'divergence') {
+                if (divergenceCache === null) loadDivergence();
+                else renderDivergence(divergenceCache);
+            }
+            if (name === 'manage') {
+                loadManageView();
+                loadPriceAlertsFromServer().then(function() { renderPriceAlertsForManage(); });
+            }
+        }
+
+        // ====== Divergence ======
+        async function loadDivergence() {
+            const loading = document.getElementById('divergenceLoading');
+            const empty = document.getElementById('divergenceEmpty');
+            const grid = document.getElementById('divergenceGrid');
+            loading.style.display = 'flex'; empty.style.display = 'none'; grid.style.display = 'none';
+            try {
+                const res = await fetch('/api/divergence');
+                const payload = await res.json();
+                divergenceCache = payload.data || [];
+                renderDivergence(divergenceCache);
+            } catch(e) {
+                loading.style.display = 'none'; empty.style.display = 'block';
+                empty.innerHTML = '<div style="color:var(--down)">加载失败: ' + e.message + '</div>';
+            }
+        }
+
+        function renderDivergence(signals) {
+            const loading = document.getElementById('divergenceLoading');
+            const empty = document.getElementById('divergenceEmpty');
+            const grid = document.getElementById('divergenceGrid');
+            loading.style.display = 'none';
+            const badge = document.getElementById('divergenceBadge');
+            if (signals && signals.length > 0) {
+                var buyCount = signals.filter(function(s) { return s.signal === '买入信号'; }).length;
+                var sellCount = signals.length - buyCount;
+                var badgeCls = 'mixed';
+                if (buyCount > 0 && sellCount === 0) badgeCls = 'buy';
+                else if (sellCount > 0 && buyCount === 0) badgeCls = 'sell';
+                badge.className = 'tab-badge ' + badgeCls;
+                badge.textContent = signals.length; badge.style.display = '';
+            } else { badge.style.display = 'none'; }
+            if (!signals || signals.length === 0) { empty.style.display = 'block'; grid.style.display = 'none'; return; }
+            empty.style.display = 'none'; grid.style.display = 'grid';
+            var sorted = signals.slice().sort(function(a, b) {
+                if (a.signal === b.signal) return a.symbol.localeCompare(b.symbol);
+                return a.signal === '买入信号' ? -1 : 1;
+            });
+            var html = '';
+            sorted.forEach(function(s) {
+                var cardCls = s.signal === '买入信号' ? 'divergence-card buy' : 'divergence-card sell';
+                var sigCls = s.signal === '买入信号' ? 'divergence-signal buy' : 'divergence-signal sell';
+                var chgCls = s.change_pct > 0 ? 'change-up' : (s.change_pct < 0 ? 'change-down' : '');
+                var chgSign = s.change_pct > 0 ? '+' : '';
+                var priceStr = s.last !== null ? s.last.toLocaleString('en-US', {maximumFractionDigits: 4}) : '-';
+                var pctStr = s.change_pct !== null ? chgSign + s.change_pct.toFixed(2) + '%' : '-';
+                html += '<div class="' + cardCls + '"><div class="divergence-header"><div class="divergence-symbol">' + s.symbol + '</div><div class="' + sigCls + '">' + s.signal + '</div></div><div class="divergence-detail"><div>价格: <span class="hl">' + priceStr + '</span> <span class="' + chgCls + '">' + pctStr + '</span></div><div>大周期: <span class="hl">' + s.big_interval + '</span> ' + s.big_trend + ' (' + s.big_consecutive + '周期)</div><div>小周期: <span class="hl">' + s.small_interval + '</span> ' + s.small_trend + ' (' + s.small_consecutive + '周期)</div></div></div>';
+            });
+            grid.innerHTML = html;
+        }
+
+        // ====== Positions ======
+        async function loadPositionsFromServer() {
+            try {
+                var res = await fetch('/api/positions');
+                var data = await res.json();
+                positionsCache = data || {};
+                localStorage.setItem(POSITIONS_KEY, JSON.stringify(positionsCache));
+            } catch(e) {
+                var raw = localStorage.getItem(POSITIONS_KEY);
+                positionsCache = raw ? JSON.parse(raw) : {};
+            }
+        }
+        function loadPositions() { return positionsCache; }
+        function savePositions(p) { positionsCache = p; localStorage.setItem(POSITIONS_KEY, JSON.stringify(p)); }
+
+        function scrollToCard(symbol) {
+            var el = document.getElementById('card-' + symbol);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.style.transition = 'box-shadow 0.3s';
+                var orig = el.style.boxShadow;
+                el.style.boxShadow = '0 0 0 2px var(--accent), 0 8px 24px rgba(59,130,246,0.3)';
+                setTimeout(function() { el.style.boxShadow = orig; }, 1500);
+            }
+        }
+
+        function showPositionDropdown(symbol, event) {
+            event.stopPropagation();
+            closePositionDropdown();
+            var trigger = event.currentTarget;
+            var rect = trigger.getBoundingClientRect();
+            var positions = loadPositions();
+            var current = positions[symbol] || null;
+            var dropdown = document.createElement('div');
+            dropdown.className = 'pos-dropdown'; dropdown.id = 'posDropdown';
+            var options = [
+                { value: 'long', label: '多', cls: 'long' },
+                { value: 'short', label: '空', cls: 'short' },
+                { value: null, label: '无', cls: 'none' }
+            ];
+            options.forEach(function(opt) {
+                var btn = document.createElement('button');
+                btn.className = 'pos-dropdown-option ' + opt.cls;
+                if (current === opt.value) btn.classList.add('active');
+                btn.textContent = opt.label;
+                btn.onclick = function(e2) { e2.stopPropagation(); selectPosition(symbol, opt.value); };
+                dropdown.appendChild(btn);
+            });
+            var left = Math.max(4, rect.left);
+            if (left + 70 > window.innerWidth - 4) left = window.innerWidth - 74;
+            dropdown.style.top = (rect.bottom + 4) + 'px';
+            dropdown.style.left = left + 'px';
+            document.body.appendChild(dropdown);
+            setTimeout(function() { document.addEventListener('click', closePositionDropdown); }, 0);
+        }
+        function closePositionDropdown(e) {
+            var ex = document.getElementById('posDropdown');
+            if (!ex) return;
+            if (e && ex.contains(e.target)) return;
+            ex.remove();
+            document.removeEventListener('click', closePositionDropdown);
+        }
+        function selectPosition(symbol, newPos) {
+            closePositionDropdown();
+            var positions = JSON.parse(JSON.stringify(loadPositions()));
+            if (newPos) positions[symbol] = newPos; else delete positions[symbol];
+            savePositions(positions);
+            updateCardPositionDOM(symbol, newPos);
+            var card = document.getElementById('card-' + symbol);
+            if (card) {
+                var grid = document.getElementById('grid');
+                var allCards = Array.from(grid.querySelectorAll('.card'));
+                var symData = {};
+                if (dataCache) dataCache.forEach(function(d) { symData[d.symbol] = d; });
+                var pw = function(p) { return p === 'short' ? 2 : (p === 'long' ? 1 : 0); };
+                allCards.sort(function(a, b) {
+                    var sA = a.id.replace('card-', ''), sB = b.id.replace('card-', '');
+                    var pa = pw(positions[sA] || null), pb = pw(positions[sB] || null);
+                    if (pa !== pb) return pb - pa;
+                    var da = symData[sA], db = symData[sB];
+                    var va = (da && da.volume_24h) || 0, vb = (db && db.volume_24h) || 0;
+                    var ca = (da && da.change_pct) || 0, cb = (db && db.change_pct) || 0;
+                    switch (currentSort) {
+                        case 'volume_desc': return vb - va;
+                        case 'volume_asc': return va - vb;
+                        case 'change_desc': return cb - ca;
+                        case 'change_asc': return ca - cb;
+                        default: return 0;
+                    }
+                });
+                allCards.forEach(function(c) { grid.appendChild(c); });
+            }
+            fetch('/api/position', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({symbol: symbol, position: newPos})
+            }).catch(function(e) { console.error('同步持仓失败', e); });
+        }
+        function updateCardPositionDOM(symbol, newPos) {
+            var card = document.getElementById('card-' + symbol);
+            if (!card) return;
+            card.classList.remove('long', 'short');
+            if (newPos) card.classList.add(newPos);
+            var badge = card.querySelector('.card-pos');
+            if (badge) {
+                badge.classList.remove('long', 'short');
+                if (newPos) { badge.classList.add(newPos); badge.textContent = newPos === 'long' ? '多' : '空'; }
+                else { badge.textContent = '＋'; }
+            }
+        }
+
+        // ====== Utilities ======
+        function escapeHtml(s) {
+            if (!s) return '';
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        function getTrendClass(t) {
+            if (t === '连续上涨') return 'trend-up';
+            if (t === '连续下跌') return 'trend-down';
+            if (t === '短期上涨') return 'trend-up-short';
+            if (t === '短期下跌') return 'trend-down-short';
+            return 'trend-neutral';
+        }
+        function formatPrice(p) {
+            if (p === null || p === undefined) return '-';
+            if (p >= 1000) return p.toLocaleString('en-US', {maximumFractionDigits: 2});
+            if (p >= 1) return p.toFixed(4);
+            return p.toFixed(6);
+        }
+        function formatVolume(v) {
+            if (v === null || v === undefined || v === 0) return '-';
+            if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+            if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+            if (v >= 1e3) return (v / 1e3).toFixed(2) + 'K';
+            return v.toFixed(2);
+        }
+        function sparklineSvg(data, trendClass) {
+            if (!data || data.length < 2) return '';
+            var vals = data.map(Number);
+            var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+            var range = mx - mn || 1, n = vals.length, vw = n * 10, vh = 16;
+            var pts = vals.map(function(v, i) {
+                var x = i * (vw / (n - 1));
+                var y = vh - 1 - ((v - mn) / range * (vh - 2));
+                return x.toFixed(1) + ',' + y.toFixed(1);
+            });
+            var color = trendClass.indexOf('up') !== -1 ? '#10b981' : (trendClass.indexOf('down') !== -1 ? '#ef4444' : '#6b7280');
+            return '<svg width="100%" height="' + vh + '" viewBox="0 0 ' + vw + ' ' + vh + '" style="display:block;margin:1px auto 0"><polyline points="' + pts.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="1" vector-effect="non-scaling-stroke"/></svg>';
+        }
+
+        function formatIndicators(iv) {
+            var parts = [];
+            if (iv.macd && iv.macd.dif !== null) {
+                var h = iv.macd.histogram;
+                var hCls = (h !== null && h >= 0) ? 'ind-up' : 'ind-down';
+                var hStr = h !== null ? (h > 0 ? '+' : '') + h.toFixed(2) : '-';
+                parts.push('MACD:<span class="' + hCls + '">' + hStr + '</span>');
+            }
+            if (iv.rsi && iv.rsi.rsi6 !== null) {
+                var r = iv.rsi.rsi6;
+                var rCls = r > 70 ? 'ind-down' : (r < 30 ? 'ind-up' : '');
+                parts.push('RSI6:<span class="' + rCls + '">' + r.toFixed(0) + '</span>');
+            }
+            if (iv.bollinger && iv.bollinger.middle !== null) {
+                parts.push('BB:' + iv.bollinger.middle.toFixed(1));
+            }
+            return parts.length > 0 ? parts.join(' ') : '';
+        }
+
+        // ====== Render Cards ======
+        function renderCards(data, alerts) {
+            var grid = document.getElementById('grid');
+            var html = '';
+            var stats = { total: data.length, dayUp: 0, dayDown: 0, fourHUp: 0, fourHDown: 0, hourUp: 0, hourDown: 0, minUp: 0, minDown: 0 };
+            var positions = loadPositions();
+            var symAlerts = {};
+            alerts.forEach(function(a) {
+                if (!symAlerts[a.symbol]) symAlerts[a.symbol] = [];
+                symAlerts[a.symbol].push(a);
+            });
+            var symDivergence = {};
+            (divergenceCache || []).forEach(function(d) {
+                if (!symDivergence[d.symbol]) symDivergence[d.symbol] = [];
+                symDivergence[d.symbol].push(d);
+            });
+
+            var pw2 = function(p) { return p === 'short' ? 2 : (p === 'long' ? 1 : 0); };
+            var sortedData = data.slice().sort(function(a, b) {
+                var pa = pw2(positions[a.symbol] || null), pb = pw2(positions[b.symbol] || null);
+                if (pa !== pb) return pb - pa;
+                var va = a.volume_24h || 0, vb = b.volume_24h || 0;
+                var ca = a.change_pct || 0, cb = b.change_pct || 0;
+                switch (currentSort) {
+                    case 'volume_desc': return vb - va;
+                    case 'volume_asc': return va - vb;
+                    case 'change_desc': return cb - ca;
+                    case 'change_asc': return ca - cb;
+                    default: return 0;
+                }
+            });
+
+            sortedData.forEach(function(item) {
+                var pos = positions[item.symbol] || null;
+                var chgCls = item.change_pct > 0 ? 'change-up' : (item.change_pct < 0 ? 'change-down' : '');
+                var chgSign = item.change_pct > 0 ? '+' : '';
+
+                var intervalsHtml = '';
+                item.intervals.forEach(function(iv) {
+                    var tc = getTrendClass(iv.trend);
+                    var detail = iv.ma10 !== null
+                        ? 'MA10: ' + formatPrice(iv.ma10) + '<br>偏离: ' + (iv.deviation > 0 ? '+' : '') + iv.deviation + '%'
+                        : (iv.candles_count < 20 ? 'K线不足(' + iv.candles_count + ')' : '无数据');
+                    var ci = iv.consecutive > 0 ? '(' + iv.consecutive + '周期)' : '';
+                    var indHtml = formatIndicators(iv);
+                    intervalsHtml += '<div class="interval-item ' + tc + '" onclick="event.stopPropagation();openChartModal(\'' + item.symbol + '\', \'' + iv.interval + '\')" title="点击查看K线图">'
+                        + '<div class="name">' + iv.name + '</div>'
+                        + '<div class="trend">' + iv.trend + ci + '</div>'
+                        + '<div class="detail">' + detail + '</div>'
+                        + (indHtml ? '<div class="indicators">' + indHtml + '</div>' : '')
+                        + sparklineSvg(iv.ma_series, tc)
+                        + '</div>';
+
+                    if (iv.name === '日K') {
+                        if (iv.trend.indexOf('上涨') !== -1) stats.dayUp++;
+                        if (iv.trend.indexOf('下跌') !== -1) stats.dayDown++;
+                    }
+                    if (iv.name === '4小时') {
+                        if (iv.trend.indexOf('上涨') !== -1) stats.fourHUp++;
+                        if (iv.trend.indexOf('下跌') !== -1) stats.fourHDown++;
+                    }
+                    if (iv.name === '60分钟') {
+                        if (iv.trend.indexOf('上涨') !== -1) stats.hourUp++;
+                        if (iv.trend.indexOf('下跌') !== -1) stats.hourDown++;
+                    }
+                    if (iv.name === '15分钟') {
+                        if (iv.trend.indexOf('上涨') !== -1) stats.minUp++;
+                        if (iv.trend.indexOf('下跌') !== -1) stats.minDown++;
+                    }
+                });
+
+                var alertsForItem = symAlerts[item.symbol] || [];
+                var cardAlertsHtml = '';
+                alertsForItem.forEach(function(a) {
+                    var cls = a.type === 'reversal_up' ? 'up' : 'down';
+                    var arrow = a.type === 'reversal_up' ? '↑' : '↓';
+                    var text = a.type === 'reversal_up' ? '上涨转折' : '下跌转折';
+                    var pct = a.reversal_pct != null ? ' 累计' + (a.reversal_pct > 0 ? '+' : '') + a.reversal_pct + '%' : '';
+                    var cond = escapeHtml(a.condition);
+                    var condStr = cond ? ' [' + cond + ']' : '';
+                    cardAlertsHtml += '<div class="card-alert ' + cls + '">' + arrow + ' ' + a.interval + text + ' (已' + a.consecutive + '周期)' + pct + condStr + '</div>';
+                });
+
+                var posLabel = pos ? (pos === 'long' ? '多' : '空') : '';
+                var posClass = pos || '';
+                var cardClass = pos ? 'card ' + pos : 'card';
+
+                var divForSym = symDivergence[item.symbol] || [];
+                var hasBuy = divForSym.some(function(d) { return d.signal === '买入信号'; });
+                var hasSell = divForSym.some(function(d) { return d.signal === '卖出信号'; });
+                var divBadgeHtml = '';
+                if (divForSym.length > 0) {
+                    var bCls = hasBuy && !hasSell ? 'buy' : (hasSell && !hasBuy ? 'sell' : 'mixed');
+                    var bLabel = hasBuy && hasSell ? 'B/S' : (hasBuy ? 'B' : 'S');
+                    var bCount = divForSym.length > 1 ? divForSym.length : '';
+                    var bTitle = divForSym.map(function(d) { return d.signal + '(' + d.big_interval + '→' + d.small_interval + ')'; }).join('; ');
+                    divBadgeHtml = '<span class="card-div-badge ' + bCls + '" onclick="event.stopPropagation();switchTab(\'divergence\')" title="背离: ' + bTitle + '">' + bLabel + bCount + '</span>';
+                }
+
+                html += '<div class="' + cardClass + '" id="card-' + item.symbol + '" onclick="openChartModal(\'' + item.symbol + '\', \'1d\')">'
+                    + '<span class="card-chart-icon" onclick="event.stopPropagation();openChartModal(\'' + item.symbol + '\', \'1d\')" title="打开K线图">📈</span>'
+                    + cardAlertsHtml
+                    + '<div class="card-header">'
+                    + '<div class="card-title"><span class="card-pos ' + posClass + '" onclick="showPositionDropdown(\'' + item.symbol + '\', event)" data-symbol="' + item.symbol + '" title="点击设置持仓">' + (posLabel || '＋') + '</span>'
+                    + item.symbol + divBadgeHtml
+                    + '<span class="price-alert-bell" data-symbol="' + item.symbol + '" onclick="showPriceAlertPopup(\'' + item.symbol + '\', event)" title="价格提醒">🔔</span>'
+                    + '</div>'
+                    + '<div class="card-price"><div class="last">' + formatPrice(item.last) + '</div>'
+                    + '<div class="change ' + chgCls + '">' + chgSign + (item.change_pct !== null ? item.change_pct.toFixed(2) : '-') + '%</div>'
+                    + '<div class="volume">24h: ' + formatVolume(item.volume_24h) + '</div></div>'
+                    + '</div>'
+                    + '<div class="intervals">' + intervalsHtml + '</div>'
+                    + '</div>';
+            });
+
+            grid.innerHTML = html;
+            grid.style.display = 'grid';
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('skeleton').style.display = 'none';
+            document.getElementById('searchBar').style.display = 'flex';
+            applyFilter();
+
+            document.getElementById('statsBar').style.display = 'flex';
+            document.getElementById('statTotal').textContent = stats.total;
+            document.getElementById('statDayUp').textContent = stats.dayUp;
+            document.getElementById('statDayDown').textContent = stats.dayDown;
+            document.getElementById('stat4hUp').textContent = stats.fourHUp;
+            document.getElementById('stat4hDown').textContent = stats.fourHDown;
+            document.getElementById('statHourUp').textContent = stats.hourUp;
+            document.getElementById('statHourDown').textContent = stats.hourDown;
+            document.getElementById('statMinUp').textContent = stats.minUp;
+            document.getElementById('statMinDown').textContent = stats.minDown;
+
+            // Alert bars
+            var alertBar = document.getElementById('alertBar');
+            var alertList = document.getElementById('alertList');
+            if (alerts.length > 0) {
+                var hasUp = false, hasDown = false;
+                var alertHtml = '';
+                alerts.forEach(function(a) {
+                    var cls = a.type === 'reversal_up' ? 'up' : 'down';
+                    var arrow = a.type === 'reversal_up' ? '↑' : '↓';
+                    var text = a.type === 'reversal_up' ? '上涨转折' : '下跌转折';
+                    var pct = a.reversal_pct != null ? ' ' + (a.reversal_pct > 0 ? '+' : '') + a.reversal_pct + '%' : '';
+                    var cond = escapeHtml(a.condition);
+                    var condStr = cond ? '[' + cond + ']' : '';
+                    alertHtml += '<span class="alert-badge ' + cls + '" onclick="scrollToCard(\'' + a.symbol + '\')" title="点击跳转">' + arrow + ' ' + a.symbol + ' ' + a.interval + text + pct + ' ' + condStr + '</span>';
+                    if (a.type === 'reversal_up') hasUp = true; else hasDown = true;
+                });
+                alertList.innerHTML = alertHtml;
+                alertBar.classList.add('active');
+                alertBar.classList.remove('alert-up', 'alert-down', 'alert-mixed');
+                if (hasUp && hasDown) alertBar.classList.add('alert-mixed');
+                else if (hasUp) alertBar.classList.add('alert-up');
+                else alertBar.classList.add('alert-down');
+            } else {
+                alertBar.classList.remove('active'); alertList.innerHTML = '';
+            }
+
+            var posAlertBar = document.getElementById('posAlertBar');
+            var posAlertList = document.getElementById('posAlertList');
+            if ((positionAlertsCache || []).length > 0) {
+                var phtml = '';
+                positionAlertsCache.forEach(function(a) {
+                    var cls = a.type === 'reversal_up' ? 'up' : 'down';
+                    var arrow = a.type === 'reversal_up' ? '↑' : '↓';
+                    var text = a.type === 'reversal_up' ? '上涨转折' : '下跌转折';
+                    var pl = a.position === 'long' ? '多' : '空';
+                    var pct = a.reversal_pct != null ? ' ' + (a.reversal_pct > 0 ? '+' : '') + a.reversal_pct + '%' : '';
+                    phtml += '<span class="alert-badge ' + cls + '" onclick="scrollToCard(\'' + a.symbol + '\')">' + arrow + ' ' + a.symbol + ' ' + a.interval + text + ' (' + pl + ')' + pct + '</span>';
+                });
+                posAlertList.innerHTML = phtml;
+                posAlertBar.classList.add('active');
+            } else {
+                posAlertBar.classList.remove('active'); posAlertList.innerHTML = '';
+            }
+        }
+
+        // ====== Data loading ======
+        async function loadData() {
+            try {
+                var res = await fetch('/api/data');
+                var payload = await res.json();
+                handleServerUpdate(payload);
+            } catch(e) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('skeleton').style.display = 'none';
+                document.getElementById('errorBox').style.display = 'block';
+                document.getElementById('errorBox').textContent = '加载失败: ' + e.message;
+            }
+        }
+
+        async function manualRefresh() {
+            var btn = document.getElementById('refreshBtn');
+            btn.disabled = true; btn.textContent = '刷新中...';
+            document.getElementById('skeleton').style.display = 'grid';
+            document.getElementById('grid').style.display = 'none';
+            try {
+                await fetch('/api/refresh', { method: 'POST' });
+                var retries = 0;
+                var check = setInterval(async function() {
+                    var res = await fetch('/api/data');
+                    var payload = await res.json();
+                    if (!payload.updating || retries > 90) {
+                        clearInterval(check);
+                        await loadData();
+                        btn.disabled = false; btn.textContent = '刷新';
+                    }
+                    retries++;
+                }, 1000);
+            } catch(e) {
+                btn.disabled = false; btn.textContent = '刷新';
+                alert('刷新失败: ' + e.message);
+            }
+        }
+
+        function startCountdown() {
+            if (countdownTimer) clearInterval(countdownTimer);
+            var isReloading = false;
+            var lastReloadTime = 0;
+            countdownTimer = setInterval(function() {
+                countdownRemaining--;
+                var m = Math.floor(Math.max(0, countdownRemaining) / 60);
+                var s = Math.max(0, countdownRemaining) % 60;
+                document.getElementById('countdown').textContent = '下次: ' + m + ':' + String(s).padStart(2, '0');
+                if (countdownRemaining <= 0 && !isReloading && Date.now() - lastReloadTime > 15000) {
+                    isReloading = true;
+                    lastReloadTime = Date.now();
+                    loadData().finally(function() { isReloading = false; });
+                }
+            }, 1000);
+        }
+
+        // ====== Chart Modal ======
+        let chartInstance = null;
+        let chartSymbol = '';
+        let chartInterval = '1d';
+        let chartSeries = {};
+        let chartData = null;
+
+        function openChartModal(symbol, interval) {
+            chartSymbol = symbol;
+            chartInterval = interval || '1d';
+            document.getElementById('modalTitle').textContent = symbol + ' - ' + chartIntervalLabel(chartInterval);
+            document.getElementById('chartModal').classList.add('active');
+            document.querySelectorAll('.iv-btn').forEach(function(b) {
+                b.classList.toggle('active', b.textContent.trim() === chartIntervalLabel(chartInterval));
+            });
+            loadChartData();
+        }
+
+        function closeChartModal() {
+            document.getElementById('chartModal').classList.remove('active');
+            if (chartInstance) { chartInstance.remove(); chartInstance = null; chartSeries = {}; }
+        }
+
+        function chartIntervalLabel(iv) {
+            if (iv === '1d') return '1d';
+            if (iv === '4h') return '4h';
+            if (iv === '1h') return '1h';
+            return '15m';
+        }
+
+        function switchChartInterval(interval) {
+            chartInterval = interval;
+            document.getElementById('modalTitle').textContent = chartSymbol + ' - ' + chartIntervalLabel(interval);
+            document.querySelectorAll('.iv-btn').forEach(function(b) {
+                b.classList.toggle('active', b.textContent.trim() === chartIntervalLabel(interval));
+            });
+            loadChartData();
+        }
+
+        async function loadChartData() {
+            try {
+                var res = await fetch('/api/klines?symbol=' + chartSymbol + '&interval=' + chartInterval + '&limit=200');
+                var payload = await res.json();
+                if (payload.error) { console.error(payload.error); return; }
+                chartData = payload.klines;
+                renderChart(chartData);
+            } catch(e) { console.error('加载K线失败', e); }
+        }
+
+        function renderChart(klines) {
+            if (!klines || klines.length < 2) return;
+            var container = document.getElementById('chartContainer');
+            container.innerHTML = '';
+
+            if (typeof LightweightCharts === 'undefined') {
+                container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-secondary)">图表库加载中，请刷新重试。或检查网络连接。</div>';
+                return;
+            }
+
+            if (chartInstance) { chartInstance.remove(); chartSeries = {}; }
+
+            chartInstance = LightweightCharts.createChart(container, {
+                layout: {
+                    background: { type: 'solid', color: 'transparent' },
+                    textColor: '#94a3b8',
+                },
+                grid: {
+                    vertLines: { color: 'rgba(71,85,105,0.3)' },
+                    horzLines: { color: 'rgba(71,85,105,0.3)' },
+                },
+                crosshair: { mode: 0 },
+                rightPriceScale: { borderColor: '#475569' },
+                timeScale: {
+                    borderColor: '#475569',
+                    timeVisible: true,
+                },
+                width: container.clientWidth,
+                height: 400,
+            });
+
+            var candleData = klines.map(function(k) {
+                return {
+                    time: parseInt(k.t) / 1000,
+                    open: parseFloat(k.o),
+                    high: parseFloat(k.h),
+                    low: parseFloat(k.l),
+                    close: parseFloat(k.c),
+                };
+            });
+
+            chartSeries.candles = chartInstance.addCandlestickSeries({
+                upColor: '#10b981', downColor: '#ef4444',
+                borderUpColor: '#10b981', borderDownColor: '#ef4444',
+                wickUpColor: '#10b981', wickDownColor: '#ef4444',
+            });
+            chartSeries.candles.setData(candleData);
+
+            // MA10
+            var closes = klines.map(function(k) { return parseFloat(k.c); });
+            var ma10 = calcSMA(closes, 10);
+            chartSeries.ma10 = chartInstance.addLineSeries({
+                color: '#f59e0b', lineWidth: 1,
+                lastValueVisible: true, priceLineVisible: false,
+            });
+            chartSeries.ma10.setData(ma10.map(function(v, i) {
+                return v !== null ? { time: candleData[i].time, value: v } : null;
+            }).filter(Boolean));
+
+            // MACD (stored for toggle)
+            chartSeries._macdData = calcMACD(closes);
+            chartSeries._rsiData = calcRSI(closes, 14);
+            chartSeries._bbData = calcBB(closes, 20, 2);
+
+            // Resize observer
+            if (!chartInstance._resizeObs) {
+                chartInstance._resizeObs = new ResizeObserver(function() {
+                    if (chartInstance) chartInstance.applyOptions({ width: container.clientWidth });
+                });
+                chartInstance._resizeObs.observe(container);
+            }
+        }
+
+        function calcSMA(data, period) {
+            var sma = [];
+            for (var i = 0; i < data.length; i++) {
+                if (i < period - 1) { sma.push(null); }
+                else {
+                    var sum = 0;
+                    for (var j = i - period + 1; j <= i; j++) sum += data[j];
+                    sma.push(sum / period);
+                }
+            }
+            return sma;
+        }
+
+        function calcMACD(closes) {
+            var ema12 = calcEMA(closes, 12);
+            var ema26 = calcEMA(closes, 26);
+            var dif = [], dea = [], hist = [];
+            for (var i = 0; i < closes.length; i++) {
+                if (ema12[i] !== null && ema26[i] !== null) dif.push(ema12[i] - ema26[i]); else dif.push(null);
+            }
+            var validDif = dif.filter(function(v) { return v !== null; });
+            var deaVals = calcEMA(validDif, 9);
+            var deaI = 0;
+            for (var i = 0; i < dif.length; i++) {
+                if (dif[i] !== null) { dea.push(deaVals[deaI] || null); hist.push((dif[i] - (deaVals[deaI] || 0)) * 2); deaI++; }
+                else { dea.push(null); hist.push(null); }
+            }
+            return { dif: dif, dea: dea, hist: hist };
+        }
+
+        function calcEMA(data, period) {
+            var k = 2 / (period + 1);
+            var ema = [];
+            for (var i = 0; i < data.length; i++) {
+                if (i < period - 1) { ema.push(null); }
+                else if (i === period - 1) {
+                    var sum = 0;
+                    for (var j = 0; j < period; j++) sum += data[j];
+                    ema.push(sum / period);
+                } else {
+                    ema.push(data[i] * k + ema[i - 1] * (1 - k));
+                }
+            }
+            return ema;
+        }
+
+        function calcRSI(closes, period) {
+            if (closes.length < period + 1) return closes.map(function() { return null; });
+            var gains = [], losses = [];
+            for (var i = 1; i < closes.length; i++) {
+                var d = closes[i] - closes[i - 1];
+                gains.push(d > 0 ? d : 0);
+                losses.push(d < 0 ? -d : 0);
+            }
+            var rsi = [];
+            for (var i = 0; i < period; i++) rsi.push(null);
+            var avgGain = 0, avgLoss = 0;
+            for (var i = 0; i < period; i++) { avgGain += gains[i]; avgLoss += losses[i]; }
+            avgGain /= period; avgLoss /= period;
+            rsi.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
+            for (var i = period; i < gains.length; i++) {
+                avgGain = (avgGain * (period - 1) + gains[i]) / period;
+                avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
+                rsi.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
+            }
+            return rsi;
+        }
+
+        function calcBB(closes, period, k) {
+            var upper = [], middle = [], lower = [];
+            for (var i = 0; i < closes.length; i++) {
+                if (i < period - 1) { upper.push(null); middle.push(null); lower.push(null); }
+                else {
+                    var window = closes.slice(i - period + 1, i + 1);
+                    var mean = window.reduce(function(a, b) { return a + b; }, 0) / period;
+                    var variance = window.reduce(function(s, x) { return s + (x - mean) * (x - mean); }, 0) / period;
+                    var std = Math.sqrt(variance);
+                    middle.push(mean);
+                    upper.push(mean + k * std);
+                    lower.push(mean - k * std);
+                }
+            }
+            return { upper: upper, middle: middle, lower: lower };
+        }
+
+        function toggleChartIndicator(name, show) {
+            if (!chartInstance || !chartSeries.candles) return;
+            if (name === 'ma10') {
+                if (chartSeries.ma10) chartSeries.ma10.applyOptions({ visible: show });
+            } else if (name === 'macd' && chartSeries._macdData) {
+                if (show) {
+                    if (!chartSeries._macdLine) {
+                        var timeData = chartSeries.candles.data().map(function(d) { return d.time; });
+                        chartSeries._macdLine = chartInstance.addLineSeries({ color: '#3b82f6', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+                        chartSeries._macdLine.setData(chartSeries._macdData.dif.map(function(v, i) { return v !== null ? { time: timeData[i], value: v } : null; }).filter(Boolean));
+                        chartSeries._macdSignal = chartInstance.addLineSeries({ color: '#ef4444', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+                        chartSeries._macdSignal.setData(chartSeries._macdData.dea.map(function(v, i) { return v !== null ? { time: timeData[i], value: v } : null; }).filter(Boolean));
+                    } else {
+                        chartSeries._macdLine.applyOptions({ visible: true });
+                        chartSeries._macdSignal.applyOptions({ visible: true });
+                    }
+                } else {
+                    if (chartSeries._macdLine) { chartSeries._macdLine.applyOptions({ visible: false }); chartSeries._macdSignal.applyOptions({ visible: false }); }
+                }
+            } else if (name === 'rsi' && chartSeries._rsiData) {
+                if (show) {
+                    if (!chartSeries._rsiLine) {
+                        var timeData = chartSeries.candles.data().map(function(d) { return d.time; });
+                        chartSeries._rsiLine = chartInstance.addLineSeries({ color: '#a855f7', lineWidth: 1, lastValueVisible: true, priceLineVisible: false });
+                        chartSeries._rsiLine.setData(chartSeries._rsiData.map(function(v, i) { return v !== null ? { time: timeData[i], value: v } : null; }).filter(Boolean));
+                    } else { chartSeries._rsiLine.applyOptions({ visible: true }); }
+                } else { if (chartSeries._rsiLine) chartSeries._rsiLine.applyOptions({ visible: false }); }
+            } else if (name === 'bb' && chartSeries._bbData) {
+                if (show) {
+                    if (!chartSeries._bbUpper) {
+                        var timeData = chartSeries.candles.data().map(function(d) { return d.time; });
+                        chartSeries._bbUpper = chartInstance.addLineSeries({ color: 'rgba(148,163,184,0.5)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+                        chartSeries._bbMiddle = chartInstance.addLineSeries({ color: 'rgba(148,163,184,0.8)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+                        chartSeries._bbLower = chartInstance.addLineSeries({ color: 'rgba(148,163,184,0.5)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+                        chartSeries._bbUpper.setData(chartSeries._bbData.upper.map(function(v, i) { return v !== null ? { time: timeData[i], value: v } : null; }).filter(Boolean));
+                        chartSeries._bbMiddle.setData(chartSeries._bbData.middle.map(function(v, i) { return v !== null ? { time: timeData[i], value: v } : null; }).filter(Boolean));
+                        chartSeries._bbLower.setData(chartSeries._bbData.lower.map(function(v, i) { return v !== null ? { time: timeData[i], value: v } : null; }).filter(Boolean));
+                    } else {
+                        chartSeries._bbUpper.applyOptions({ visible: true });
+                        chartSeries._bbMiddle.applyOptions({ visible: true });
+                        chartSeries._bbLower.applyOptions({ visible: true });
+                    }
+                } else {
+                    if (chartSeries._bbUpper) { chartSeries._bbUpper.applyOptions({ visible: false }); chartSeries._bbMiddle.applyOptions({ visible: false }); chartSeries._bbLower.applyOptions({ visible: false }); }
+                }
+            }
+        }
+
+        // Close modal on overlay click
+        document.getElementById('chartModal').addEventListener('click', function(e) {
+            if (e.target === this) closeChartModal();
+        });
+
+        // ====== Search input ======
+        document.getElementById('searchInput').addEventListener('input', function() {
+            currentSearchQuery = this.value.toLowerCase().trim();
+            applyFilter();
+        });
+
+        // ====== Price Alerts ======
+        let priceAlertsCache = {};
+
+        function loadPriceAlertsFromServer() {
+            return fetch('/api/price-alerts')
+                .then(function(r) { return r.json(); })
+                .then(function(data) { priceAlertsCache = data || {}; })
+                .catch(function() { priceAlertsCache = {}; });
+        }
+
+        function showPriceAlertPopup(symbol, event) {
+            event.stopPropagation();
+            closePriceAlertPopup();
+            var rules = priceAlertsCache[symbol] || [];
+            var trigger = event.currentTarget;
+            var rect = trigger.getBoundingClientRect();
+            var popup = document.createElement('div');
+            popup.className = 'price-alert-popup';
+            popup.id = 'priceAlertPopup';
+            var html = '<div class="title">' + symbol + ' 价格提醒</div>';
+            rules.forEach(function(rule, idx) {
+                var trigCls = rule.triggered ? ' triggered' : '';
+                var dirLabel = rule.direction === 'above' ? '突破' : '跌破';
+                var arrow = rule.direction === 'above' ? '↑' : '↓';
+                html += '<div class="rule-row' + trigCls + '">' + arrow + ' ' + dirLabel + ' ' + formatPrice(rule.price);
+                if (rule.triggered) {
+                    html += ' (已触发 @' + formatPrice(rule.triggered_price) + ')';
+                }
+                html += '<button class="rule-remove" onclick="removePriceAlert(\'' + symbol + '\',' + idx + ')">&times;</button></div>';
+            });
+            html += '<div class="add-row"><select id="paDirection"><option value="above">突破</option><option value="below">跌破</option></select>';
+            html += '<input type="number" id="paPrice" placeholder="价格" step="any">';
+            html += '<button class="btn btn-sm" onclick="addPriceAlert(\'' + symbol + '\')">+</button></div>';
+            popup.innerHTML = html;
+            var left = Math.max(4, rect.left);
+            if (left + 210 > window.innerWidth - 4) left = window.innerWidth - 214;
+            popup.style.top = (rect.bottom + 4) + 'px';
+            popup.style.left = left + 'px';
+            document.body.appendChild(popup);
+            setTimeout(function() { document.addEventListener('click', closePriceAlertPopup); }, 0);
+        }
+
+        function closePriceAlertPopup(e) {
+            var ex = document.getElementById('priceAlertPopup');
+            if (!ex) return;
+            if (e && ex.contains(e.target)) return;
+            ex.remove();
+            document.removeEventListener('click', closePriceAlertPopup);
+        }
+
+        function addPriceAlert(symbol) {
+            var dir = document.getElementById('paDirection').value;
+            var price = parseFloat(document.getElementById('paPrice').value);
+            if (isNaN(price) || price <= 0) return;
+            fetch('/api/price-alerts', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({symbol: symbol, direction: dir, price: price})
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                priceAlertsCache = data.alerts || {};
+                closePriceAlertPopup();
+                updateAllPriceBellStates();
+            }).catch(function(e) { console.error('添加价格提醒失败', e); });
+        }
+
+        function removePriceAlert(symbol, index) {
+            fetch('/api/price-alerts', {
+                method: 'DELETE',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({symbol: symbol, index: index})
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                priceAlertsCache = data.alerts || {};
+                updateAllPriceBellStates();
+                closePriceAlertPopup();
+                showPriceAlertPopup(symbol, {currentTarget: document.querySelector('.price-alert-bell[data-symbol="' + symbol + '"]'), stopPropagation: function(){}});
+            }).catch(function(e) { console.error('删除价格提醒失败', e); });
+        }
+
+        function updateAllPriceBellStates() {
+            document.querySelectorAll('.price-alert-bell').forEach(function(bell) {
+                var sym = bell.getAttribute('data-symbol');
+                var rules = priceAlertsCache[sym] || [];
+                var active = rules.filter(function(r) { return !r.triggered; });
+                var triggered = rules.filter(function(r) { return r.triggered; });
+                bell.classList.remove('has-alerts', 'triggered');
+                if (triggered.length > 0) { bell.classList.add('triggered'); bell.title = triggered.length + '个已触发'; }
+                else if (active.length > 0) { bell.classList.add('has-alerts'); bell.title = active.length + '个提醒待触发'; }
+                else { bell.title = '价格提醒'; }
+            });
+            renderPriceAlertsForManage();
+        }
+
+        function renderPriceAlertsForManage() {
+            var el = document.getElementById('managePriceAlerts');
+            if (!el) return;
+            var hasAny = false;
+            var html = '';
+            Object.keys(priceAlertsCache).forEach(function(sym) {
+                var rules = priceAlertsCache[sym];
+                if (!rules || rules.length === 0) return;
+                hasAny = true;
+                html += '<div style="margin-bottom:4px;"><strong>' + sym + '</strong>: ';
+                rules.forEach(function(r) {
+                    var arrow = r.direction === 'above' ? '↑' : '↓';
+                    var cls = r.triggered ? 'card-price-tag triggered' : (r.direction === 'above' ? 'card-price-tag above' : 'card-price-tag below');
+                    html += '<span class="' + cls + '">' + arrow + ' ' + formatPrice(r.price) + '</span> ';
+                });
+                html += '</div>';
+            });
+            if (!hasAny) html = '<div>暂无价格提醒。点击监控面板卡片上的 🔔 图标设置。</div>';
+            el.innerHTML = html;
+        }
+
+        // ====== Symbol Management ======
+        function loadManageView() {
+            fetch('/api/symbols').then(function(r) { return r.json(); }).then(function(data) {
+                var tags = document.getElementById('manageTags');
+                document.getElementById('manageCount').textContent = data.count;
+                var html = '';
+                (data.symbols || []).sort().forEach(function(s) {
+                    html += '<span class="symbol-tag">' + s + ' <span class="remove" onclick="removeSymbol(\'' + s + '\')" title="移除">&times;</span></span>';
+                });
+                tags.innerHTML = html;
+                document.getElementById('manageMsg').textContent = '';
+            }).catch(function(e) {
+                document.getElementById('manageMsg').textContent = '加载失败: ' + e.message;
+            });
+        }
+
+        function addSymbol() {
+            var name = document.getElementById('newSymbolName').value.trim().toUpperCase();
+            var contract = document.getElementById('newSymbolContract').value.trim();
+            var msg = document.getElementById('manageMsg');
+            if (!name || !contract) { msg.textContent = '请填写标的名称和合约名'; msg.style.color = 'var(--down)'; return; }
+            msg.textContent = '添加中...'; msg.style.color = 'var(--text-secondary)';
+            fetch('/api/symbols', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({symbol: name, contract: contract})
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (data.error) { msg.textContent = data.error; msg.style.color = 'var(--down)'; }
+                else {
+                    msg.textContent = '已添加 ' + data.symbol + '，重启后生效';
+                    msg.style.color = 'var(--up)';
+                    document.getElementById('newSymbolName').value = '';
+                    document.getElementById('newSymbolContract').value = '';
+                    loadManageView();
+                }
+            }).catch(function(e) { msg.textContent = '请求失败: ' + e.message; msg.style.color = 'var(--down)'; });
+        }
+
+        function removeSymbol(symbol) {
+            if (!confirm('确定要移除 ' + symbol + ' 吗？')) return;
+            var msg = document.getElementById('manageMsg');
+            fetch('/api/symbols', {
+                method: 'DELETE',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({symbol: symbol})
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (data.error) { msg.textContent = data.error; msg.style.color = 'var(--down)'; }
+                else {
+                    msg.textContent = '已移除 ' + symbol + '，重启后生效';
+                    msg.style.color = 'var(--up)';
+                    loadManageView();
+                }
+            }).catch(function(e) { msg.textContent = '请求失败: ' + e.message; msg.style.color = 'var(--down)'; });
+        }
+
+        // ====== Init ======
+        loadPositionsFromServer().then(function() {
+            return loadPriceAlertsFromServer();
+        }).then(function() {
+            loadData();
+            startCountdown();
+            connectSSE();
+        });
+    </script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+</body>
+</html>

@@ -1,14 +1,19 @@
-# Gate.io 美股数字货币 MA10 趋势监控系统
+# Gate.io 美股数字货币 MA10 趋势监控系统 v2.0
 
 ## 一、项目简介
 
-本项目是一个基于 **Gate.io U本位永续合约 API** 的 MA10（10周期移动平均线）趋势监控系统。系统支持 **Web 可视化面板** 和 **命令行脚本** 两种使用方式，可实时监控多个加密货币和美股代币的日K、4小时、60分钟、15分钟四个时间周期的 MA10 趋势方向（连续上涨 / 连续下跌 / 震荡）。
+本项目是一个基于 **Gate.io U本位永续合约 API** 的 MA10（10周期移动平均线）趋势监控系统。系统支持 **Web 可视化面板** 和 **命令行脚本** 两种使用方式，可实时监控 100 个加密货币和美股代币的日K、4小时、60分钟、15分钟四个时间周期的 MA10 趋势方向（连续上涨 / 连续下跌 / 震荡）。
 
 **核心特点：**
 - 针对中国大陆网络环境优化（Gate.io 可直接访问，无需代理）
-- 自动筛选可用标的，不可用的自动剔除
-- 暗色主题响应式 Web 面板，手机/电脑均可使用
-- 后台定时刷新 + 手动刷新双模式
+- 成交额前 100 标的自动筛选
+- **模块化架构**：app.py / monitor.py / alerts.py / state.py / templates/index.html 五模块
+- **技术指标**：MACD / RSI / 布林带 服务端+客户端双重计算
+- **K线图表**：lightweight-charts 交互式图表，支持指标叠加
+- **SSE 实时推送** + 60s 轮询降级
+- **SQLite K线缓存**，API 调用量减半
+- 亮色/暗色主题响应式 Web 面板，手机/电脑均可使用
+- 价格提醒、键盘快捷键、骨架屏加载
 - 零成本运行（Gate.io API 免费）
 
 ---
@@ -18,10 +23,11 @@
 | 层级 | 技术 | 说明 |
 |------|------|------|
 | 数据源 | Gate.io U本位合约 API | `https://api.gateio.ws/api/v4` |
-| 后端 | Flask (Python) | 轻量 Web 框架，提供 REST API |
-| 前端 | HTML5 + CSS3 + Vanilla JS | 暗色主题、响应式网格布局、内联样式（无外部 CDN 依赖） |
-| 数据存储 | JSON 文件 + 内存缓存 | 标的信息持久化，监控数据内存缓存 |
-| 网络库 | requests | Python HTTP 请求 |
+| 后端 | Flask (Python) | 轻量 Web 框架，提供 REST API + SSE |
+| 前端 | HTML5 + CSS3 + Vanilla JS | 暗色/亮色双主题、响应式网格、lightweight-charts K线图 |
+| 图表 | lightweight-charts 4.1.3 | TradingView 出品，CDN 加载 |
+| 数据存储 | JSON 文件 + SQLite + 内存缓存 | 原子写入防损坏，K线本地缓存 |
+| 网络库 | requests (连接池复用) | 线程级 Session，并发5线程 |
 
 ---
 
@@ -30,41 +36,50 @@
 ```
 美股数字货币监控项目/
 │
-├── app.py                              # [核心] Flask Web 面板主程序
-│                                       #   - 启动命令: python app.py
-│                                       #   - 访问地址: http://127.0.0.1:5000
-│                                       #   - 局域网: http://电脑IP:5000
+├── app.py                              # [核心] Flask Web 面板 (~300行)
+│                                       #   路由 + SSE + 启动逻辑
 │
-├── gateio_available_symbols.json       # [配置] 32个可用标的列表
-│                                       #   - 由 gateio_futures_scan.py 自动生成
-│                                       #   - 包含: user_symbol, contract, last, change_percentage
+├── monitor.py                          # [核心] MonitorCore + 技术指标 (~340行)
+│                                       #   数据获取、MA/MACD/RSI/布林带计算
+│
+├── alerts.py                           # [核心] 预警与通知 (~210行)
+│                                       #   转折预警、背离检测、企微推送
+│
+├── state.py                            # [核心] 状态持久化 (~160行)
+│                                       #   持仓/价格提醒/MA10状态/SQLite缓存
+│
+├── templates/
+│   └── index.html                      # [核心] 完整前端 (~1400行)
+│                                       #   暗色/亮色双主题、K线图模态框
+│
+├── gateio_available_symbols.json       # [配置] 100个可用标的列表
 │
 ├── gateio_futures_monitor.py           # [脚本] 命令行版完整监控
-│                                       #   - 直接在终端输出所有标的的 MA10 趋势
-│                                       #   - 适合不启动 Web 服务时使用
 │
 ├── gateio_futures_scan.py              # [工具] Gate.io 合约市场标的扫描器
-│                                       #   - 输入用户标的列表，自动检测哪些在 Gate.io 可用
-│                                       #   - 生成 gateio_available_symbols.json
 │
-├── requirements.txt                    # Python 依赖清单
-│                                       #   - flask >= 2.0.0
-│                                       #   - requests >= 2.25.0
+├── requirements.txt                    # Python 依赖: flask + requests
 │
-├── CLAUDE.md                           # 本文件，项目文档
+├── README.md                           # 项目说明（面向用户）
+├── CLAUDE.md                           # 本文件（面向 AI 开发者）
 │
-# --- 以下为测试/备用/历史脚本，非核心运行依赖 ---
+# --- 运行时生成文件 ---
+├── klines.db                           # SQLite K线缓存
+├── .ma10_state.json                    # 转折预警状态
+├── positions.json                      # 持仓标记持久化
+├── price_alerts.json                   # 价格提醒持久化
 │
-├── gateio_ma10_monitor.py              # [历史] Gate.io 现货版监控脚本（早期版本，仅支持现货市场）
-├── binance_ma10_monitor.py             # [备用] Binance 版监控脚本（中国大陆网络不可访问，备用）
-├── finnhub_monitor.py                  # [备用] Finnhub 美股监控（免费版无 K 线数据）
+# --- 以下为测试/备用/历史脚本 ---
+├── gateio_ma10_monitor.py              # [历史] 现货版监控（早期版本）
+├── binance_ma10_monitor.py             # [备用] Binance 版（中国大陆不可用）
+├── finnhub_monitor.py                  # [备用] Finnhub 美股监控
 ├── finnhub_test.py                     # [测试] Finnhub API 稳定性测试
-├── test_apis.py                        # [测试] 多交易所 API 在中国大陆可达性测试
-├── test_binance_final.py               # [测试] Binance API 最终连通性验证
-├── test_futures_kline.py               # [测试] Gate.io 合约 K 线返回格式验证
-├── test_gateio_futures.py              # [测试] Gate.io 合约市场美股标的可用性测试
-├── test_symbols.py                     # [测试] 标的可用性测试（无下划线格式）
-└── test_symbols2.py                    # [测试] 标的可用性测试（下划线格式，最终版）
+├── test_apis.py                        # [测试] 多交易所可达性测试
+├── test_binance_final.py               # [测试] Binance 连通性验证
+├── test_futures_kline.py               # [测试] 合约K线返回格式验证
+├── test_gateio_futures.py              # [测试] 合约市场美股标的可用性
+├── test_symbols.py                     # [测试] 标的可用性测试
+└── test_symbols2.py                    # [测试] 标的可用性测试（下划线格式）
 ```
 
 ---
@@ -158,12 +173,16 @@ Web 面板提供以下 REST API：
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/` | GET | 渲染主页面（HTML） |
-| `/api/data` | GET | 获取当前监控数据（JSON，含背离信号） |
-| `/api/divergence` | GET | 获取多周期背离信号列表 |
+| `/` | GET | 渲染主页面 |
+| `/api/data` | GET | 监控数据（含指标、背离、预警、价格提醒） |
+| `/api/divergence` | GET | 背离信号列表 |
 | `/api/refresh` | POST | 触发后台数据刷新（异步） |
-| `/api/positions` | GET | 获取所有持仓标记 |
-| `/api/position` | POST | 更新单个标的持仓标记（body: `{symbol, position}`） |
+| `/api/positions` | GET | 获取持仓标记 |
+| `/api/position` | POST | 更新持仓标记 (body: `{symbol, position}`) |
+| `/api/stream` | GET | SSE 实时推送 |
+| `/api/klines` | GET | K线数据 (?symbol=&interval=&limit=) |
+| `/api/symbols` | GET/POST/DELETE | 标的管理 |
+| `/api/price-alerts` | GET/POST/DELETE | 价格提醒管理 |
 
 ### `/api/divergence` 返回示例
 
@@ -261,16 +280,11 @@ Web 面板提供以下 REST API：
 
 ---
 
-## 八、当前监控标的（32个）
+## 八、当前监控标的（100个）
 
-### 加密货币（23个）
-BTC、ETH、SOL、HYPE、ZEC、NEAR、CL（原油）、BSB、XRP、BEAT、DOGE、SUI、ONDO、GMT、IN、GRASS、XAU（黄金）、XAG（白银）、BILL、TAO、EDEN、WLD
+标的由 `gateio_futures_scan.py` 自动从 Gate.io 全量合约中按 **24h 成交额排名** 筛选前 100 名，保存至 `gateio_available_symbols.json`。
 
-### 美股/ETF 代币（9个）
-MU、SNDK、SOXL、EWY、INTC、DRAM、CBRS、AMD、QCOM、TSM
-
-### 不可用标的（已剔除）
-1000PEPE、NVDA、QQQ、CRCL、MSTR、SPY、TSLA、GOOGL、COIN、NATGAS、AMZN —— Gate.io 未上线这些合约
+当前覆盖 BTC、ETH、SOL、XAU(黄金)、XAG(白银)、XRP、DOGE 等约 88 个加密货币/代币，以及 MU、SNDK、NVDAX、TSLAX 等约 12 个美股/ETF 代币合约。
 
 ---
 
@@ -349,13 +363,16 @@ A: 打开 `app.py`，找到 `AUTO_REFRESH_INTERVAL = 300`，将 300 改为需要
 
 | 日期 | 版本 | 内容 |
 |------|------|------|
-| 2026-05-24 | v1.0 | 初始版本：32个标的、3周期 MA10、Web 面板、命令行脚本 |
-| 2026-05-24 | v1.1 | MA10 转折预警 + 企业微信通知 + 早期预警(<=3周期) + 涨跌幅计算 |
-| 2026-05-25 | v1.2 | 4小时周期 + 持仓持久化 + 预警跳转 + 自动启动浏览器 + 黑客风格启动画面 + 进度条 + 端口清理 |
-| 2026-05-26 | v1.3 | 多周期背离信号：大周期连续≥5同向 + 小周期反向 → 买入/卖出信号，前端新增「周期背离」标签页 |
-| 2026-05-28 | v1.4.2 | 修复前端倒计时与后端刷新调度脱节（`next_refresh_in`始终为0→倒计时重置300s），新增30秒同步机制 |
-| 2026-05-28 | v1.4.1 | 24h成交额卡片展示 + 多维度排序(成交额/涨跌幅) + 修复持仓切换后卡片不置顶的排序bug |
-| 2026-05-27 | v1.4 | 标的扩展至成交额前100 + 并行数据获取(5~8线程) + 实时搜索过滤 + 持仓下拉选择 + 转折预警强度条件优化(cons=2 改前高/前低) |
+| 2026-05-28 | **v2.0** | 模块化架构重构（app/monitor/alerts/state/templates 五模块）；MACD/RSI/布林带技术指标；K线图表可视化（lightweight-charts）；SSE 实时推送 + 轮询降级；SQLite K线缓存（API 调用减半）；亮色/暗色主题切换；骨架屏加载；键盘快捷键；前端标的管理；价格提醒（突破/跌破阈值 + 触发高亮）；API 限流保护（类型检查 + 重试退避）；背离算法优化（≥10 周期 + 价格确认）；移动端底部导航栏 |
+| 2026-05-28 | v1.4.2 | 修复前端倒计时与后端刷新调度脱节 |
+| 2026-05-28 | v1.4.1 | 24h成交额卡片展示 + 多维度排序 + 修复持仓排序bug |
+| 2026-05-27 | v1.4 | 标的扩展至成交额前100 + 并行数据获取 + 搜索过滤 + 持仓下拉 |
+| 2026-05-26 | v1.3.2 | 转折预警调度精确到第59分钟 |
+| 2026-05-26 | v1.3.1 | 转折预警按周期边界调度 + 状态存储重构 |
+| 2026-05-26 | v1.3 | 多周期背离信号 + K线对齐自动刷新 |
+| 2026-05-25 | v1.2 | 4小时周期 + 持仓持久化 + 自动启动浏览器 |
+| 2026-05-24 | v1.1 | 趋势转折预警 + 企业微信推送 |
+| 2026-05-24 | v1.0 | 初始版本：32标的 + 四周期 MA10 + Web 面板 |
 
 ---
 

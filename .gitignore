@@ -7,9 +7,17 @@ __pycache__/
 .ma10_state.json
 .monitor_state.json
 positions.json
+price_alerts.json
+klines.db
 
 # Backup folders
 *_backup_*/
+
+# Release packages
+releases/
+
+# Screenshots
+screenshots/
 
 # IDE
 .vscode/
