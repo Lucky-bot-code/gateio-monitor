@@ -304,7 +304,7 @@ def refresh_data():
 
 
 def _next_refresh_delay() -> float:
-    """计算到下一个对齐15分钟K线收盘的时间(秒)。提前55秒启动刷新。"""
+    """计算到下一个对齐15分钟K线收盘的时间(秒)。提前115秒启动刷新，确保标的较多时也能在收盘前完成。"""
     now = datetime.now()
     next_boundary = ((now.minute // 15) + 1) * 15
     target = now.replace(second=0, microsecond=0)
@@ -312,7 +312,7 @@ def _next_refresh_delay() -> float:
         target = target.replace(minute=0) + timedelta(hours=1)
     else:
         target = target.replace(minute=next_boundary)
-    target -= timedelta(seconds=55)
+    target -= timedelta(seconds=115)
     delay = (target - now).total_seconds()
     if delay < 5:
         delay += 900
@@ -499,6 +499,11 @@ def api_symbols_add():
     existing = {s["user_symbol"] for s in cfg.get("available", [])}
     if user_symbol in existing:
         return jsonify({"error": f"{user_symbol} already exists"}), 409
+    # 验证合约是否真实存在于 Gate.io
+    monitor = MonitorCore()
+    ticker = monitor.fetch_ticker(contract)
+    if ticker is None:
+        return jsonify({"error": f"合约不存在: {contract}，请检查合约名是否正确"}), 400
     cfg["available"].append({
         "user_symbol": user_symbol,
         "contract": contract,

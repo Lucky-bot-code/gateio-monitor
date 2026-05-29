@@ -793,12 +793,207 @@
       "rank": 99
     },
     {
-      "user_symbol": "SAGAUSDT",
-      "contract": "SAGA_USDT",
-      "last": 0.02006,
-      "change_percentage": -4.61,
-      "volume_24h_quote": 1158428.0,
-      "rank": 100
+      "user_symbol": "LITEUSDT",
+      "contract": "LITE_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "AMDUSDT",
+      "contract": "AMD_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "CBRSUSDT",
+      "contract": "CBRS_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "SPCXUSDT",
+      "contract": "SPCX_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "NBISUSDT",
+      "contract": "NBIS_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "MSFTUSDT",
+      "contract": "MSFT_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "QCOMUSDT",
+      "contract": "QCOM_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "ARMUSDT",
+      "contract": "ARM_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "TSMUSDT",
+      "contract": "TSM_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "OPENAIUSDT",
+      "contract": "OPENAI_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "RKLBUSDT",
+      "contract": "RKLB_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "BABAUSDT",
+      "contract": "BABA_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "USARUSDT",
+      "contract": "USAR_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "AVGOUSDT",
+      "contract": "AVGO_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "WDCUSDT",
+      "contract": "WDC_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "CRWVUSDT",
+      "contract": "CRWV_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "BEUSDT",
+      "contract": "BE_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "COHRUSDT",
+      "contract": "COHR_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "FLNCUSDT",
+      "contract": "FLNC_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "HDUSDT",
+      "contract": "HD_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "EWJUSDT",
+      "contract": "EWJ_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "CSCOUSDT",
+      "contract": "CSCO_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "WMTUSDT",
+      "contract": "WMT_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "PAYPUSDT",
+      "contract": "PAYP_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "BRKBUSDT",
+      "contract": "BRKB_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "DISUSDT",
+      "contract": "DIS_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "VUSDT",
+      "contract": "V_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "JPMUSDT",
+      "contract": "JPM_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "UBERUSDT",
+      "contract": "UBER_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
     }
   ],
   "unavailable": [],
