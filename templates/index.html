@@ -102,6 +102,16 @@
         }
         .sort-select:focus { border-color: var(--accent); }
         .search-count { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; }
+        .filter-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+        .filter-chip {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 6px; padding: 5px 10px;
+            font-size: 0.7rem; color: var(--text-secondary);
+            cursor: pointer; user-select: none; white-space: nowrap;
+            transition: all 0.15s;
+        }
+        .filter-chip:hover { border-color: var(--accent); color: var(--text-primary); }
+        .filter-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
         .stats-bar {
             display: flex; gap: 14px; padding: 10px 20px;
             background: var(--bg-secondary); border-bottom: 1px solid var(--border);
@@ -526,6 +536,13 @@
                 <option value="change_desc">涨跌幅: 高→低</option>
                 <option value="change_asc">涨跌幅: 低→高</option>
             </select>
+            <div class="filter-chips" id="filterChips">
+                <span class="filter-chip" data-key="15m" data-threshold="40" onclick="toggleChip(this)" title="15分钟连续≥40">15m≥40</span>
+                <span class="filter-chip" data-key="1h" data-threshold="30" onclick="toggleChip(this)" title="60分钟连续≥30">1h≥30</span>
+                <span class="filter-chip" data-key="4h" data-threshold="20" onclick="toggleChip(this)" title="4小时连续≥20">4h≥20</span>
+                <span class="filter-chip" data-key="1d" data-threshold="10" onclick="toggleChip(this)" title="日K连续≥10">1d≥10</span>
+                <span class="filter-chip" data-key="extreme" data-threshold="0" onclick="toggleChip(this)" title="连续≥10 + 偏离=极偏 + 极偏≥均偏×2">极偏信号</span>
+            </div>
             <span class="search-count" id="searchCount"></span>
         </div>
         <div id="grid" class="grid" style="display:none"></div>
@@ -716,13 +733,35 @@
         });
 
         // ====== Filter / Sort ======
+        function getActiveChips() {
+            var chips = document.querySelectorAll('.filter-chip.active');
+            var active = [];
+            chips.forEach(function(c) { active.push({ key: c.dataset.key, threshold: parseInt(c.dataset.threshold) }); });
+            return active;
+        }
+
+        function toggleChip(chip) {
+            chip.classList.toggle('active');
+            applyFilter();
+        }
+
         function applyFilter() {
             var query = currentSearchQuery;
+            var activeChips = getActiveChips();
             var cards = document.querySelectorAll('#grid .card');
             var visibleCount = 0;
             cards.forEach(function(card) {
                 var symbol = card.id.replace('card-', '').toLowerCase();
-                var match = !query || symbol.indexOf(query) !== -1;
+                var nameMatch = !query || symbol.indexOf(query) !== -1;
+                var consMatch = true;
+                if (activeChips.length > 0) {
+                    consMatch = activeChips.every(function(chip) {
+                        if (chip.key === 'extreme') return card.getAttribute('data-extreme') === '1';
+                        var val = parseInt(card.getAttribute('data-c' + chip.key)) || 0;
+                        return val >= chip.threshold;
+                    });
+                }
+                var match = nameMatch && consMatch;
                 card.style.display = match ? '' : 'none';
                 if (match) visibleCount++;
             });
@@ -958,7 +997,7 @@
 
         function formatIndicators(iv) {
             var parts = [];
-            if (iv.deviation !== null && iv.deviation !== undefined) {
+            if (iv.consecutive >= 10 && iv.deviation !== null && iv.deviation !== undefined) {
                 var d = iv.deviation;
                 var absD = Math.abs(d);
                 var dCls = absD >= 5 ? 'ind-strong' : (absD >= 2 ? 'ind-moderate' : '');
@@ -967,13 +1006,13 @@
                 var dClsFinal = absD >= 2 ? dDir + ' ' + dCls : dCls;
                 parts.push('偏离:<span class="' + dClsFinal + '">' + dSign + d.toFixed(1) + '%</span>');
             }
-            if (iv.consecutive_dev_avg !== null && iv.consecutive_dev_avg !== undefined) {
+            if (iv.consecutive >= 10 && iv.consecutive_dev_avg !== null && iv.consecutive_dev_avg !== undefined) {
                 var ca = iv.consecutive_dev_avg;
                 var caSign = ca > 0 ? '+' : '';
                 var caCls = ca > 0 ? 'ind-down' : 'ind-up';
                 parts.push('均偏:<span class="' + caCls + '">' + caSign + ca.toFixed(1) + '%</span>');
             }
-            if (iv.consecutive_dev_max !== null && iv.consecutive_dev_max !== undefined) {
+            if (iv.consecutive >= 10 && iv.consecutive_dev_max !== null && iv.consecutive_dev_max !== undefined) {
                 var cm = iv.consecutive_dev_max;
                 var isMax = Math.abs(Math.abs(iv.deviation) - cm) < 0.01;
                 var cmCls = isMax ? 'ind-gold' : (cm >= 5 ? 'ind-strong' : '');
@@ -1091,7 +1130,19 @@
                     divBadgeHtml = '<span class="card-div-badge ' + bCls + '" onclick="event.stopPropagation();switchTab(\'divergence\')" title="背离: ' + bTitle + '">' + bLabel + bCount + '</span>';
                 }
 
-                html += '<div class="' + cardClass + '" id="card-' + item.symbol + '" onclick="openChartModal(\'' + item.symbol + '\', \'1d\')">'
+                var consData = '';
+                var hasExtreme = false;
+                item.intervals.forEach(function(iv) {
+                    var ikey = iv.interval === '1d' ? '1d' : (iv.interval === '4h' ? '4h' : (iv.interval === '1h' ? '1h' : '15m'));
+                    consData += ' data-c' + ikey + '="' + (iv.consecutive || 0) + '"';
+                    if (iv.consecutive >= 10 && iv.consecutive_dev_max !== null && iv.consecutive_dev_avg !== null && iv.deviation !== null &&
+                        Math.abs(Math.abs(iv.deviation) - iv.consecutive_dev_max) < 0.01 &&
+                        iv.consecutive_dev_max >= iv.consecutive_dev_avg * 2) {
+                        hasExtreme = true;
+                    }
+                });
+                consData += ' data-extreme="' + (hasExtreme ? '1' : '0') + '"';
+                html += '<div class="' + cardClass + '" id="card-' + item.symbol + '"' + consData + ' onclick="openChartModal(\'' + item.symbol + '\', \'1d\')">'
                     + '<span class="card-chart-icon" onclick="event.stopPropagation();openChartModal(\'' + item.symbol + '\', \'1d\')" title="打开K线图">📈</span>'
                     + cardAlertsHtml
                     + '<div class="card-header">'
