@@ -110,7 +110,8 @@
         .stats-bar .stat { white-space: nowrap; }
         .stats-bar .stat span { color: var(--text-secondary); }
         .container { padding: 14px 20px; max-width: 1400px; margin: 0 auto; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+        @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
         @media (max-width: 480px) {
             .grid { grid-template-columns: 1fr; }
             .header h1 { font-size: 0.95rem; }
@@ -301,7 +302,8 @@
         .card:hover .card-chart-icon { opacity: 1; }
 
         /* Skeleton */
-        .skeleton-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+        .skeleton-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+        @media (max-width: 900px) { .skeleton-grid { grid-template-columns: repeat(2, 1fr); } }
         @media (max-width: 480px) { .skeleton-grid { grid-template-columns: 1fr; } }
         .skeleton-card {
             background: var(--bg-secondary); border: 1px solid var(--border);
@@ -992,7 +994,7 @@
                     else if (pctB < 0) bbCls = 'ind-up ind-strong';
                     else if (pctB > 80) bbCls = 'ind-down';
                     else if (pctB < 20) bbCls = 'ind-up';
-                    parts.push('BB:<span class="' + bbCls + '">' + pctB.toFixed(0) + '%</span>');
+                    parts.push('BB(10,1.5):<span class="' + bbCls + '">' + pctB.toFixed(0) + '%</span>');
                 }
             }
             return parts.length > 0 ? parts.join(' ') : '';
