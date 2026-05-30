@@ -586,7 +586,6 @@
             <div class="modal-indicators">
                 <label><input type="checkbox" id="chkMA10" checked onchange="toggleChartIndicator('ma10', this.checked)"> MA10</label>
                 <label><input type="checkbox" id="chkMACD" onchange="toggleChartIndicator('macd', this.checked)"> MACD</label>
-                <label><input type="checkbox" id="chkRSI" onchange="toggleChartIndicator('rsi', this.checked)"> RSI(14)</label>
                 <label><input type="checkbox" id="chkBB" onchange="toggleChartIndicator('bb', this.checked)"> 布林带</label>
             </div>
         </div>
@@ -980,12 +979,7 @@
                 var cmCls = isMax ? 'ind-gold' : (cm >= 5 ? 'ind-strong' : '');
                 parts.push('极偏:<span class="' + cmCls + '">' + cm.toFixed(1) + '%</span>');
             }
-            if (iv.rsi && iv.rsi.rsi6 !== null) {
-                var r = iv.rsi.rsi6;
-                var rCls = r > 70 ? 'ind-down' : (r < 30 ? 'ind-up' : '');
-                parts.push('RSI6:<span class="' + rCls + '">' + r.toFixed(0) + '</span>');
-            }
-            if (iv.bollinger && iv.bollinger.upper !== null) {
+            if (iv.consecutive >= 10 && iv.bollinger && iv.bollinger.upper !== null) {
                 var bb = iv.bollinger;
                 var pctB = iv.close !== null ? ((iv.close - bb.lower) / (bb.upper - bb.lower) * 100) : null;
                 var bbCls = '';
@@ -1040,9 +1034,7 @@
                 var intervalsHtml = '';
                 item.intervals.forEach(function(iv) {
                     var tc = getTrendClass(iv.trend);
-                    var detail = iv.ma10 !== null
-                        ? 'MA10: ' + formatPrice(iv.ma10) + '<br>偏离: ' + (iv.deviation > 0 ? '+' : '') + iv.deviation + '%'
-                        : (iv.candles_count < 20 ? 'K线不足(' + iv.candles_count + ')' : '无数据');
+                    var detail = iv.candles_count < 20 ? 'K线不足(' + iv.candles_count + ')' : '';
                     var ci = iv.consecutive > 0 ? '(' + iv.consecutive + '周期)' : '';
                     var indHtml = formatIndicators(iv);
                     intervalsHtml += '<div class="interval-item ' + tc + '" onclick="event.stopPropagation();openChartModal(\'' + item.symbol + '\', \'' + iv.interval + '\')" title="点击查看K线图">'
@@ -1343,7 +1335,6 @@
 
             // MACD (stored for toggle)
             chartSeries._macdData = calcMACD(closes);
-            chartSeries._rsiData = calcRSI(closes, 14);
             chartSeries._bbData = calcBB(closes, 10, 1.5);
 
             // Sync indicator checkboxes with chart (fix: re-open loses checked state)
@@ -1351,7 +1342,6 @@
                 var ma10Chk = document.getElementById('chkMA10');
                 if (ma10Chk && !ma10Chk.checked && chartSeries.ma10) chartSeries.ma10.applyOptions({ visible: false });
                 if (document.getElementById('chkMACD') && document.getElementById('chkMACD').checked) toggleChartIndicator('macd', true);
-                if (document.getElementById('chkRSI') && document.getElementById('chkRSI').checked) toggleChartIndicator('rsi', true);
                 if (document.getElementById('chkBB') && document.getElementById('chkBB').checked) toggleChartIndicator('bb', true);
             }, 50);
 
@@ -1410,28 +1400,6 @@
             return ema;
         }
 
-        function calcRSI(closes, period) {
-            if (closes.length < period + 1) return closes.map(function() { return null; });
-            var gains = [], losses = [];
-            for (var i = 1; i < closes.length; i++) {
-                var d = closes[i] - closes[i - 1];
-                gains.push(d > 0 ? d : 0);
-                losses.push(d < 0 ? -d : 0);
-            }
-            var rsi = [];
-            for (var i = 0; i < period; i++) rsi.push(null);
-            var avgGain = 0, avgLoss = 0;
-            for (var i = 0; i < period; i++) { avgGain += gains[i]; avgLoss += losses[i]; }
-            avgGain /= period; avgLoss /= period;
-            rsi.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
-            for (var i = period; i < gains.length; i++) {
-                avgGain = (avgGain * (period - 1) + gains[i]) / period;
-                avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
-                rsi.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
-            }
-            return rsi;
-        }
-
         function calcBB(closes, period, k) {
             var upper = [], middle = [], lower = [];
             for (var i = 0; i < closes.length; i++) {
@@ -1468,14 +1436,6 @@
                 } else {
                     if (chartSeries._macdLine) { chartSeries._macdLine.applyOptions({ visible: false }); chartSeries._macdSignal.applyOptions({ visible: false }); }
                 }
-            } else if (name === 'rsi' && chartSeries._rsiData) {
-                if (show) {
-                    if (!chartSeries._rsiLine) {
-                        var timeData = chartSeries.candles.data().map(function(d) { return d.time; });
-                        chartSeries._rsiLine = chartInstance.addLineSeries({ color: '#a855f7', lineWidth: 1, lastValueVisible: true, priceLineVisible: false });
-                        chartSeries._rsiLine.setData(chartSeries._rsiData.map(function(v, i) { return v !== null ? { time: timeData[i], value: v } : null; }).filter(Boolean));
-                    } else { chartSeries._rsiLine.applyOptions({ visible: true }); }
-                } else { if (chartSeries._rsiLine) chartSeries._rsiLine.applyOptions({ visible: false }); }
             } else if (name === 'bb' && chartSeries._bbData) {
                 if (show) {
                     if (!chartSeries._bbUpper) {

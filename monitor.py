@@ -1,5 +1,5 @@
 """
-Gate.io U本位合约 数据获取 + MA/MACD/RSI/布林带 计算
+Gate.io U本位合约 数据获取 + MA/MACD/布林带 计算
 """
 import json
 import os
@@ -68,29 +68,6 @@ def calculate_macd(closes: List[float]) -> Tuple[
         if dif[i] is not None and dea[i] is not None:
             histogram[i] = (dif[i] - dea[i]) * 2
     return dif, dea, histogram
-
-
-def calculate_rsi(closes: List[float], period: int = 14) -> List[Optional[float]]:
-    """Wilder 平滑 RSI"""
-    n = len(closes)
-    if n < period + 1:
-        return [None] * n
-    deltas = [closes[i] - closes[i - 1] for i in range(1, n)]
-    gains = [d if d > 0 else 0.0 for d in deltas]
-    losses = [-d if d < 0 else 0.0 for d in deltas]
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
-    rsi = [None] * period
-    rsi.append(100.0 - (100.0 / (1.0 + avg_gain / avg_loss)) if avg_loss != 0 else 100.0)
-    for i in range(period, len(deltas)):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-        if avg_loss != 0:
-            rs = avg_gain / avg_loss
-            rsi.append(100.0 - (100.0 / (1.0 + rs)))
-        else:
-            rsi.append(100.0)
-    return rsi
 
 
 def calculate_bollinger(
@@ -296,9 +273,6 @@ class MonitorCore:
 
             # 技术指标
             macd_dif, macd_dea, macd_hist = calculate_macd(closes)
-            rsi6 = calculate_rsi(closes, 6)
-            rsi12 = calculate_rsi(closes, 12)
-            rsi24 = calculate_rsi(closes, 24)
             bb_upper, bb_middle, bb_lower = calculate_bollinger(closes, 10, 1.5)
 
             iv_data = {
@@ -323,11 +297,6 @@ class MonitorCore:
                     "dea": round(macd_dea[-1], 4) if macd_dea[-1] is not None else None,
                     "histogram": round(macd_hist[-1], 4) if macd_hist[-1] is not None else None,
                 } if macd_dif[-1] is not None else None,
-                "rsi": {
-                    "rsi6": round(rsi6[-1], 1) if rsi6[-1] is not None else None,
-                    "rsi12": round(rsi12[-1], 1) if rsi12[-1] is not None else None,
-                    "rsi24": round(rsi24[-1], 1) if rsi24[-1] is not None else None,
-                } if rsi6[-1] is not None else None,
                 "bollinger": {
                     "upper": round(bb_upper[-1], 4) if bb_upper[-1] is not None else None,
                     "middle": round(bb_middle[-1], 4) if bb_middle[-1] is not None else None,
