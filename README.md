@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-2.0%2B-green)](https://flask.palletsprojects.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-v2.0-brightgreen)](.)
+[![Version](https://img.shields.io/badge/Version-v2.1-brightgreen)](.)
 
 ---
 
@@ -14,7 +14,7 @@
 ### 核心监控
 - **四周期趋势**：日K、4小时、60分钟、15分钟 MA10 趋势方向 + sparkline 走势小图
 - **成交额前100标的**：自动按 Gate.io 24h 成交额排名取前 100 个 USDT 合约
-- **技术指标**：MACD (12/26/9)、RSI (6/12/24)、布林带 (20, 2.0)，卡片内紧凑展示
+- **技术指标**：偏离率 + 均偏/极偏（连续周期统计）、RSI (6/12/24)、布林带 %B（百分比位），卡片内紧凑展示；K线图模态框内可叠加 MACD/RSI/布林带
 - **K线图表**：点击卡片弹出交互式 K线图（TradingView lightweight-charts），支持周期切换 + 指标叠加
 
 ### 预警与通知
@@ -29,7 +29,7 @@
 - **骨架屏加载**：刷新时 shimmer 动画占位卡片
 - **键盘快捷键**：`/` 搜索 `R` 刷新 `Esc` 关闭
 - **持仓管理**：多/空/无三态标记，服务器端持久化，持仓标的最大置顶
-- **标的管理**：前端直接添加/移除监控标的，添加时实时验证合约是否存在，无需修改 JSON 文件
+- **标的管理**：输入简称（如 `btc`）自动推导完整合约名，实时验证 Gate.io 合约是否存在，无需修改 JSON 文件
 - **搜索 + 排序**：实时搜索过滤，按持仓/成交额/涨跌幅多维度排序
 - **移动端适配**：底部导航栏，响应式网格布局，手机/电脑均可使用
 
@@ -110,8 +110,8 @@ python gateio_futures_monitor.py
 - **背离/预警 badge**：有背离信号或转折预警时显示
 - **价格提醒铃铛** 🔔：点击设置突破/跌破阈值
 - **右上**：最新价 + 24h 涨跌幅 + 24h 成交额
-- **四格趋势**：日K / 4h / 1h / 15m 趋势状态 + sparkline + 指标摘要
-- **点击卡片**：打开 K线图表模态框（支持 MA10/MACD/RSI/布林带 叠加）
+- **四格趋势**：日K / 4h / 1h / 15m 趋势状态 + sparkline + 偏离率 / 均偏 / 极偏 / RSI6 / %B
+- **点击卡片**：打开 K线图表模态框（支持 MA10/MACD/RSI/布林带 指标叠加）
 
 ### 趋势颜色编码
 
@@ -184,6 +184,7 @@ WECOM_WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的
 
 | 日期 | 版本 | 内容 |
 |------|------|------|
+| 2026-05-30 | v2.1 | 偏离率指标卡片展示（颜色梯度）；均偏/极偏连续周期统计（极偏=当前偏离时金色高亮）；布林带改为 %B 百分比位显示；标的添加简化为单字段（输入简称自动推导）；K线拉取量 50→120 消除连续周期 40 上限；去除卡片 MACD 显示（K线图仍可叠加） |
 | 2026-05-29 | v2.0.1 | 添加标的时实时验证 Gate.io 合约是否存在；刷新提前量从 55s 增加到 115s，适配标的扩容后的 API 耗时 |
 | 2026-05-28 | **v2.0** | 模块化架构重构（app/monitor/alerts/state/templates 五模块）；MACD/RSI/布林带技术指标；K线图表可视化（lightweight-charts）；SSE 实时推送 + 轮询降级；SQLite K线缓存（API 调用减半）；亮色/暗色主题切换；骨架屏加载；键盘快捷键；前端标的管理；价格提醒（突破/跌破阈值 + 触发高亮）；API 限流保护（类型检查 + 重试退避）；背离算法优化（≥10 周期 + 价格确认）；移动端底部导航栏 |
 | 2026-05-28 | v1.4.2 | 修复前端倒计时与后端刷新调度脱节 |

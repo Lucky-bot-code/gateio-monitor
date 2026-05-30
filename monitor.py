@@ -14,7 +14,7 @@ import requests
 BASE_URL = "https://api.gateio.ws/api/v4"
 CONFIG_FILE = "gateio_available_symbols.json"
 REQUEST_DELAY = 0.10
-KLINES_LIMIT = 50
+KLINES_LIMIT = 120
 
 # 线程本地 Session（连接池复用）
 _session_local = threading.local()
@@ -249,6 +249,8 @@ class MonitorCore:
                     "ma10": None,
                     "close": None,
                     "deviation": None,
+                    "consecutive_dev_avg": None,
+                    "consecutive_dev_max": None,
                     "candles_count": len(klines) if klines else 0,
                 })
                 continue
@@ -261,6 +263,22 @@ class MonitorCore:
             deviation = (
                 (closes[-1] - valid_ma[-1]) / valid_ma[-1] * 100 if valid_ma else 0
             )
+
+            # 连续周期的偏离统计（均偏、极偏）
+            consecutive_dev_avg = None
+            consecutive_dev_max = None
+            if trend in ("连续上涨", "连续下跌") and consecutive > 0 and valid_ma:
+                dev_series = []
+                for i in range(len(closes)):
+                    if ma10[i] is not None and ma10[i] != 0:
+                        dev_series.append((closes[i] - ma10[i]) / ma10[i] * 100)
+                    else:
+                        dev_series.append(None)
+                n = min(consecutive + 1, len(dev_series))
+                devs = [d for d in dev_series[-n:] if d is not None]
+                if devs:
+                    consecutive_dev_avg = round(sum(devs) / len(devs), 2)
+                    consecutive_dev_max = round(max(abs(d) for d in devs), 2)
 
             cur_k = klines_sorted[-1]
             prev_k = klines_sorted[-2] if len(klines_sorted) >= 2 else None
@@ -291,6 +309,8 @@ class MonitorCore:
                 "ma10": round(valid_ma[-1], 4) if valid_ma else None,
                 "close": round(closes[-1], 4),
                 "deviation": round(deviation, 2),
+                "consecutive_dev_avg": consecutive_dev_avg,
+                "consecutive_dev_max": consecutive_dev_max,
                 "reversal_pct": round(reversal_pct, 2) if reversal_pct is not None else None,
                 "candles_count": len(klines),
                 "ma_series": [round(v, 2) for v in recent_ma] if recent_ma else [],

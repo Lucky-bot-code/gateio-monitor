@@ -485,12 +485,24 @@ def api_symbols_list():
 
 @app.route("/api/symbols", methods=["POST"])
 def api_symbols_add():
-    """添加监控标的。需要提供 user_symbol 和 contract"""
+    """添加监控标的。输入简称自动推导 user_symbol 和 contract"""
     data = request.get_json() or {}
-    user_symbol = (data.get("symbol") or "").strip().upper()
-    contract = (data.get("contract") or "").strip()
-    if not user_symbol or not contract:
-        return jsonify({"error": "symbol and contract required"}), 400
+    raw = ((data.get("name") or data.get("symbol") or "").strip().upper())
+    if not raw:
+        return jsonify({"error": "请输入代币简称"}), 400
+    base = raw
+    if base.endswith("_USDT"):
+        base = base[:-5]
+    elif base.endswith("USDT"):
+        base = base[:-4]
+    base = base.strip("_")
+    if not base:
+        return jsonify({"error": "无法解析代币名称"}), 400
+    user_symbol = base + "USDT"
+    contract = base + "_USDT"
+    # 允许直接传入 contract 覆盖推导结果（保持向下兼容）
+    if data.get("contract"):
+        contract = data["contract"].strip()
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             cfg = json.load(f)

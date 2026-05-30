@@ -994,6 +994,27 @@
       "last": 0,
       "change_percentage": 0,
       "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "ALLOUSDT",
+      "contract": "ALLO_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "HEIUSDT",
+      "contract": "HEI_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "IDUSDT",
+      "contract": "ID_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
     }
   ],
   "unavailable": [],

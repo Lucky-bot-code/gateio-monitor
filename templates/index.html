@@ -181,6 +181,9 @@
         .interval-item .indicators { font-size: 0.6rem; color: var(--text-secondary); margin-top: 2px; line-height: 1.3; }
         .interval-item .indicators .ind-up { color: var(--up); }
         .interval-item .indicators .ind-down { color: var(--down); }
+        .interval-item .indicators .ind-strong { font-weight: 700; }
+        .interval-item .indicators .ind-moderate { font-weight: 500; opacity: 0.85; }
+        .interval-item .indicators .ind-gold { color: #f59e0b; font-weight: 700; }
         .trend-up { background: var(--up-bg); border-color: var(--up); }
         .trend-up .trend { color: var(--up); }
         .trend-down { background: var(--down-bg); border-color: var(--down); }
@@ -545,10 +548,9 @@
     <div class="container">
         <div class="manage-section" style="margin-bottom:30px;">
             <h3>添加标的</h3>
-            <div class="hint">输入 Gate.io U本位合约名称。例如: BTC_USDT 对应 BTCUSDT</div>
+            <div class="hint">输入代币简称即可自动补全。例如输入 <b>btc</b> 自动添加 BTCUSDT / BTC_USDT</div>
             <div class="add-symbol-row">
-                <input type="text" id="newSymbolName" class="search-input" placeholder="标的名称 (如 BTCUSDT)" style="width:160px;">
-                <input type="text" id="newSymbolContract" class="search-input" placeholder="合约名 (如 BTC_USDT)" style="width:180px;">
+                <input type="text" id="newSymbolInput" class="search-input" placeholder="输入简称 (如 btc、eth、xau)" style="width:280px;">
                 <button class="btn" onclick="addSymbol()">添加</button>
             </div>
             <div id="manageMsg" style="font-size:0.72rem; margin-top:6px;"></div>
@@ -955,19 +957,43 @@
 
         function formatIndicators(iv) {
             var parts = [];
-            if (iv.macd && iv.macd.dif !== null) {
-                var h = iv.macd.histogram;
-                var hCls = (h !== null && h >= 0) ? 'ind-up' : 'ind-down';
-                var hStr = h !== null ? (h > 0 ? '+' : '') + h.toFixed(2) : '-';
-                parts.push('MACD:<span class="' + hCls + '">' + hStr + '</span>');
+            if (iv.deviation !== null && iv.deviation !== undefined) {
+                var d = iv.deviation;
+                var absD = Math.abs(d);
+                var dCls = absD >= 5 ? 'ind-strong' : (absD >= 2 ? 'ind-moderate' : '');
+                var dSign = d > 0 ? '+' : '';
+                var dDir = d > 0 ? 'ind-down' : 'ind-up';
+                var dClsFinal = absD >= 2 ? dDir + ' ' + dCls : dCls;
+                parts.push('偏离:<span class="' + dClsFinal + '">' + dSign + d.toFixed(1) + '%</span>');
+            }
+            if (iv.consecutive_dev_avg !== null && iv.consecutive_dev_avg !== undefined) {
+                var ca = iv.consecutive_dev_avg;
+                var caSign = ca > 0 ? '+' : '';
+                var caCls = ca > 0 ? 'ind-down' : 'ind-up';
+                parts.push('均偏:<span class="' + caCls + '">' + caSign + ca.toFixed(1) + '%</span>');
+            }
+            if (iv.consecutive_dev_max !== null && iv.consecutive_dev_max !== undefined) {
+                var cm = iv.consecutive_dev_max;
+                var isMax = Math.abs(Math.abs(iv.deviation) - cm) < 0.01;
+                var cmCls = isMax ? 'ind-gold' : (cm >= 5 ? 'ind-strong' : '');
+                parts.push('极偏:<span class="' + cmCls + '">' + cm.toFixed(1) + '%</span>');
             }
             if (iv.rsi && iv.rsi.rsi6 !== null) {
                 var r = iv.rsi.rsi6;
                 var rCls = r > 70 ? 'ind-down' : (r < 30 ? 'ind-up' : '');
                 parts.push('RSI6:<span class="' + rCls + '">' + r.toFixed(0) + '</span>');
             }
-            if (iv.bollinger && iv.bollinger.middle !== null) {
-                parts.push('BB:' + iv.bollinger.middle.toFixed(1));
+            if (iv.bollinger && iv.bollinger.upper !== null) {
+                var bb = iv.bollinger;
+                var pctB = iv.close !== null ? ((iv.close - bb.lower) / (bb.upper - bb.lower) * 100) : null;
+                var bbCls = '';
+                if (pctB !== null) {
+                    if (pctB > 100) bbCls = 'ind-down ind-strong';
+                    else if (pctB < 0) bbCls = 'ind-up ind-strong';
+                    else if (pctB > 80) bbCls = 'ind-down';
+                    else if (pctB < 20) bbCls = 'ind-up';
+                    parts.push('BB:<span class="' + bbCls + '">' + pctB.toFixed(0) + '%</span>');
+                }
             }
             return parts.length > 0 ? parts.join(' ') : '';
         }
@@ -1601,22 +1627,20 @@
         }
 
         function addSymbol() {
-            var name = document.getElementById('newSymbolName').value.trim().toUpperCase();
-            var contract = document.getElementById('newSymbolContract').value.trim();
+            var raw = document.getElementById('newSymbolInput').value.trim();
             var msg = document.getElementById('manageMsg');
-            if (!name || !contract) { msg.textContent = '请填写标的名称和合约名'; msg.style.color = 'var(--down)'; return; }
+            if (!raw) { msg.textContent = '请输入代币简称'; msg.style.color = 'var(--down)'; return; }
             msg.textContent = '添加中...'; msg.style.color = 'var(--text-secondary)';
             fetch('/api/symbols', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({symbol: name, contract: contract})
+                body: JSON.stringify({name: raw})
             }).then(function(r) { return r.json(); }).then(function(data) {
                 if (data.error) { msg.textContent = data.error; msg.style.color = 'var(--down)'; }
                 else {
                     msg.textContent = '已添加 ' + data.symbol + '，重启后生效';
                     msg.style.color = 'var(--up)';
-                    document.getElementById('newSymbolName').value = '';
-                    document.getElementById('newSymbolContract').value = '';
+                    document.getElementById('newSymbolInput').value = '';
                     loadManageView();
                 }
             }).catch(function(e) { msg.textContent = '请求失败: ' + e.message; msg.style.color = 'var(--down)'; });
