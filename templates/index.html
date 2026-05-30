@@ -582,10 +582,10 @@
             </div>
             <div id="chartContainer"></div>
             <div class="modal-indicators">
-                <label><input type="checkbox" checked onchange="toggleChartIndicator('ma10', this.checked)"> MA10</label>
-                <label><input type="checkbox" onchange="toggleChartIndicator('macd', this.checked)"> MACD</label>
-                <label><input type="checkbox" onchange="toggleChartIndicator('rsi', this.checked)"> RSI(14)</label>
-                <label><input type="checkbox" onchange="toggleChartIndicator('bb', this.checked)"> 布林带</label>
+                <label><input type="checkbox" id="chkMA10" checked onchange="toggleChartIndicator('ma10', this.checked)"> MA10</label>
+                <label><input type="checkbox" id="chkMACD" onchange="toggleChartIndicator('macd', this.checked)"> MACD</label>
+                <label><input type="checkbox" id="chkRSI" onchange="toggleChartIndicator('rsi', this.checked)"> RSI(14)</label>
+                <label><input type="checkbox" id="chkBB" onchange="toggleChartIndicator('bb', this.checked)"> 布林带</label>
             </div>
         </div>
     </div>
@@ -1342,7 +1342,16 @@
             // MACD (stored for toggle)
             chartSeries._macdData = calcMACD(closes);
             chartSeries._rsiData = calcRSI(closes, 14);
-            chartSeries._bbData = calcBB(closes, 20, 2);
+            chartSeries._bbData = calcBB(closes, 10, 1.5);
+
+            // Sync indicator checkboxes with chart (fix: re-open loses checked state)
+            setTimeout(function() {
+                var ma10Chk = document.getElementById('chkMA10');
+                if (ma10Chk && !ma10Chk.checked && chartSeries.ma10) chartSeries.ma10.applyOptions({ visible: false });
+                if (document.getElementById('chkMACD') && document.getElementById('chkMACD').checked) toggleChartIndicator('macd', true);
+                if (document.getElementById('chkRSI') && document.getElementById('chkRSI').checked) toggleChartIndicator('rsi', true);
+                if (document.getElementById('chkBB') && document.getElementById('chkBB').checked) toggleChartIndicator('bb', true);
+            }, 50);
 
             // Resize observer
             if (!chartInstance._resizeObs) {

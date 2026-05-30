@@ -299,7 +299,7 @@ class MonitorCore:
             rsi6 = calculate_rsi(closes, 6)
             rsi12 = calculate_rsi(closes, 12)
             rsi24 = calculate_rsi(closes, 24)
-            bb_upper, bb_middle, bb_lower = calculate_bollinger(closes, 20, 2.0)
+            bb_upper, bb_middle, bb_lower = calculate_bollinger(closes, 10, 1.5)
 
             iv_data = {
                 "name": interval_name,
