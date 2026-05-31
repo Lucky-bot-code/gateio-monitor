@@ -13,11 +13,18 @@ import requests
 
 BASE_URL = "https://api.gateio.ws/api/v4"
 CONFIG_FILE = "gateio_available_symbols.json"
-REQUEST_DELAY = 0.10
-KLINES_LIMIT = 120
+KLINES_LIMIT = 200
+
+# SOCKS5 代理（仅用于 Gate.io API，不影响系统网络）
+# 设为 None 则不使用代理，走直连
+PROXY_URL = "socks5://127.0.0.1:10808"
 
 # 线程本地 Session（连接池复用）
 _session_local = threading.local()
+
+# 全局 API 并发限流（Gate.io 约 20 req/s 限流）
+_api_sem = threading.Semaphore(4)
+REQUEST_DELAY = 0.06
 
 
 def get_session() -> requests.Session:
@@ -27,48 +34,13 @@ def get_session() -> requests.Session:
             pool_connections=20, pool_maxsize=20, max_retries=2
         )
         s.mount("https://", adapter)
+        if PROXY_URL:
+            s.proxies = {"http": PROXY_URL, "https": PROXY_URL}
         _session_local.session = s
     return _session_local.session
 
 
 # ========== 技术指标计算 ==========
-
-def calculate_ema(values: List[float], period: int) -> List[Optional[float]]:
-    """指数移动平均，SMA 做种子"""
-    k = 2.0 / (period + 1)
-    n = len(values)
-    ema = [None] * n
-    if n < period:
-        return ema
-    ema[period - 1] = sum(values[:period]) / period
-    for i in range(period, n):
-        ema[i] = values[i] * k + ema[i - 1] * (1 - k)
-    return ema
-
-
-def calculate_macd(closes: List[float]) -> Tuple[
-    List[Optional[float]], List[Optional[float]], List[Optional[float]]
-]:
-    """返回 (dif, dea, histogram)，参数 EMA(12,26,9)"""
-    ema12 = calculate_ema(closes, 12)
-    ema26 = calculate_ema(closes, 26)
-    n = len(closes)
-    dif = [None] * n
-    for i in range(n):
-        if ema12[i] is not None and ema26[i] is not None:
-            dif[i] = ema12[i] - ema26[i]
-    # DEA = EMA(DIF, 9)，DIF 有效后才计算
-    padded = [(d if d is not None else 0.0) for d in dif]
-    dea = calculate_ema(padded, 9)
-    for i in range(n):
-        if dif[i] is None:
-            dea[i] = None
-    histogram = [None] * n
-    for i in range(n):
-        if dif[i] is not None and dea[i] is not None:
-            histogram[i] = (dif[i] - dea[i]) * 2
-    return dif, dea, histogram
-
 
 def calculate_bollinger(
     closes: List[float], period: int = 20, k: float = 2.0
@@ -94,21 +66,31 @@ def calculate_bollinger(
 # ========== MonitorCore ==========
 
 class MonitorCore:
+    _symbols_cache = None
+    _symbols_cache_mtime = 0
+
     def __init__(self):
         self.symbols = self._load_symbols()
 
-    def _load_symbols(self) -> List[Dict]:
+    @classmethod
+    def _load_symbols(cls) -> List[Dict]:
         if not os.path.exists(CONFIG_FILE):
             return []
+        mtime = os.path.getmtime(CONFIG_FILE)
+        if cls._symbols_cache is not None and cls._symbols_cache_mtime == mtime:
+            return cls._symbols_cache
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("available", [])
+        cls._symbols_cache = data.get("available", [])
+        cls._symbols_cache_mtime = mtime
+        return cls._symbols_cache
 
     def fetch_ticker(self, contract: str, session=None) -> Optional[Dict]:
         s = session or get_session()
         try:
             url = f"{BASE_URL}/futures/usdt/tickers"
-            resp = s.get(url, params={"contract": contract}, timeout=15)
+            with _api_sem:
+                resp = s.get(url, params={"contract": contract}, timeout=15)
             data = resp.json()
             if data and isinstance(data, list) and len(data) > 0:
                 return data[0]
@@ -124,15 +106,15 @@ class MonitorCore:
         for attempt in range(3):
             try:
                 url = f"{BASE_URL}/futures/usdt/candlesticks"
-                resp = s.get(
-                    url,
-                    params={"contract": contract, "interval": interval, "limit": limit},
-                    timeout=15,
-                )
+                with _api_sem:
+                    resp = s.get(
+                        url,
+                        params={"contract": contract, "interval": interval, "limit": limit},
+                        timeout=15,
+                    )
                 data = resp.json()
                 if isinstance(data, list):
                     return data
-                # API returned error dict — likely rate limiting
                 last_error = data
                 time.sleep(1.0 * (attempt + 1))
             except Exception as e:
@@ -163,8 +145,8 @@ class MonitorCore:
         consecutive_up = 0
         consecutive_down = 0
         for i in range(len(valid_ma) - 2, -1, -1):
-            curr = valid_ma[i]
-            nxt = valid_ma[i + 1]
+            curr = round(valid_ma[i], 4)
+            nxt = round(valid_ma[i + 1], 4)
             if nxt > curr:
                 if consecutive_down > 0:
                     break
@@ -173,8 +155,6 @@ class MonitorCore:
                 if consecutive_up > 0:
                     break
                 consecutive_down += 1
-            else:
-                break
 
         display_window = valid_ma[-7:]
         if consecutive_up >= min_consecutive:
@@ -187,6 +167,85 @@ class MonitorCore:
             return "短期下跌", consecutive_down, display_window
         else:
             return "震荡", 0, display_window
+
+    def _process_interval(self, contract: str, interval: str, interval_name: str,
+                          session) -> Dict:
+        """获取单个周期K线并计算所有指标，返回该周期的 iv_data"""
+        klines = self.fetch_klines(contract, interval, KLINES_LIMIT, session)
+        empty = {
+            "name": interval_name, "interval": interval,
+            "trend": "数据不足", "consecutive": 0,
+            "ma10": None, "close": None, "deviation": None,
+            "consecutive_dev_avg": None, "consecutive_dev_max": None,
+            "candles_count": len(klines) if klines else 0,
+        }
+        if not klines or len(klines) < 20:
+            return empty
+
+        klines_sorted = sorted(klines, key=lambda x: int(x["t"]))
+        closes = [float(k["c"]) for k in klines_sorted]
+        ma10 = self.calculate_ma(closes, period=10)
+        valid_ma = [v for v in ma10 if v is not None]
+        trend, consecutive, recent_ma = self.analyze_trend(ma10, min_consecutive=3)
+        deviation = (
+            (closes[-1] - valid_ma[-1]) / valid_ma[-1] * 100 if valid_ma else 0
+        )
+
+        # 连续周期的偏离统计（均偏、极偏）
+        consecutive_dev_avg = None
+        consecutive_dev_max = None
+        if trend in ("连续上涨", "连续下跌") and consecutive > 0 and valid_ma:
+            dev_series = []
+            for i in range(len(closes)):
+                if ma10[i] is not None and ma10[i] != 0:
+                    dev_series.append((closes[i] - ma10[i]) / ma10[i] * 100)
+                else:
+                    dev_series.append(None)
+            n = min(consecutive + 1, len(dev_series))
+            devs = [d for d in dev_series[-n:] if d is not None]
+            if devs:
+                consecutive_dev_avg = round(sum(devs) / len(devs), 2)
+                consecutive_dev_max = round(max(abs(d) for d in devs), 2)
+
+        cur_k = klines_sorted[-1]
+        prev_k = klines_sorted[-2] if len(klines_sorted) >= 2 else None
+        volume = float(cur_k["v"])
+        prev_volume = float(prev_k["v"]) if prev_k else 0
+        prev_high = float(prev_k["h"]) if prev_k else 0
+        prev_low = float(prev_k["l"]) if prev_k else float("inf")
+
+        reversal_pct = None
+        if 1 <= consecutive <= 3 and trend not in ("数据不足", "震荡"):
+            if len(closes) >= consecutive + 2:
+                start_close = closes[-consecutive - 1]
+                if start_close != 0:
+                    reversal_pct = (closes[-1] - start_close) / start_close * 100
+
+        bb_upper, bb_middle, bb_lower = calculate_bollinger(closes, 10, 1.5)
+
+        return {
+            "name": interval_name,
+            "interval": interval,
+            "trend": trend,
+            "consecutive": consecutive,
+            "ma10": round(valid_ma[-1], 4) if valid_ma else None,
+            "close": round(closes[-1], 4),
+            "deviation": round(deviation, 2),
+            "consecutive_dev_avg": consecutive_dev_avg,
+            "consecutive_dev_max": consecutive_dev_max,
+            "reversal_pct": round(reversal_pct, 2) if reversal_pct is not None else None,
+            "candles_count": len(klines),
+            "ma_series": [round(v, 2) for v in recent_ma] if recent_ma else [],
+            "volume": round(volume, 2),
+            "prev_volume": round(prev_volume, 2),
+            "prev_high": round(prev_high, 4),
+            "prev_low": round(prev_low, 4) if prev_low != float("inf") else float("inf"),
+            "bollinger": {
+                "upper": round(bb_upper[-1], 4) if bb_upper[-1] is not None else None,
+                "middle": round(bb_middle[-1], 4) if bb_middle[-1] is not None else None,
+                "lower": round(bb_lower[-1], 4) if bb_lower[-1] is not None else None,
+            } if bb_upper[-1] is not None else None,
+        }
 
     def _fetch_symbol_data(self, sym_info: Dict) -> Dict:
         """获取单个标的的 ticker + 4 周期 K 线 + 技术指标"""
@@ -210,99 +269,12 @@ class MonitorCore:
             result["change_pct"] = None
             result["volume_24h"] = None
 
-        # 各周期 K 线 + 指标
+        # 各周期串行获取 + 短延迟限流
         for interval, interval_name in [
             ("1d", "日K"), ("4h", "4小时"), ("1h", "60分钟"), ("15m", "15分钟")
         ]:
             time.sleep(REQUEST_DELAY)
-            klines = self.fetch_klines(contract, interval, KLINES_LIMIT, session)
-
-            if not klines or len(klines) < 20:
-                result["intervals"].append({
-                    "name": interval_name,
-                    "interval": interval,
-                    "trend": "数据不足",
-                    "consecutive": 0,
-                    "ma10": None,
-                    "close": None,
-                    "deviation": None,
-                    "consecutive_dev_avg": None,
-                    "consecutive_dev_max": None,
-                    "candles_count": len(klines) if klines else 0,
-                })
-                continue
-
-            klines_sorted = sorted(klines, key=lambda x: int(x["t"]))
-            closes = [float(k["c"]) for k in klines_sorted]
-            ma10 = self.calculate_ma(closes, period=10)
-            valid_ma = [v for v in ma10 if v is not None]
-            trend, consecutive, recent_ma = self.analyze_trend(ma10, min_consecutive=3)
-            deviation = (
-                (closes[-1] - valid_ma[-1]) / valid_ma[-1] * 100 if valid_ma else 0
-            )
-
-            # 连续周期的偏离统计（均偏、极偏）
-            consecutive_dev_avg = None
-            consecutive_dev_max = None
-            if trend in ("连续上涨", "连续下跌") and consecutive > 0 and valid_ma:
-                dev_series = []
-                for i in range(len(closes)):
-                    if ma10[i] is not None and ma10[i] != 0:
-                        dev_series.append((closes[i] - ma10[i]) / ma10[i] * 100)
-                    else:
-                        dev_series.append(None)
-                n = min(consecutive + 1, len(dev_series))
-                devs = [d for d in dev_series[-n:] if d is not None]
-                if devs:
-                    consecutive_dev_avg = round(sum(devs) / len(devs), 2)
-                    consecutive_dev_max = round(max(abs(d) for d in devs), 2)
-
-            cur_k = klines_sorted[-1]
-            prev_k = klines_sorted[-2] if len(klines_sorted) >= 2 else None
-            volume = float(cur_k["v"])
-            prev_volume = float(prev_k["v"]) if prev_k else 0
-            prev_high = float(prev_k["h"]) if prev_k else 0
-            prev_low = float(prev_k["l"]) if prev_k else float("inf")
-
-            reversal_pct = None
-            if 1 <= consecutive <= 3 and trend not in ("数据不足", "震荡"):
-                if len(closes) >= consecutive + 2:
-                    start_close = closes[-consecutive - 1]
-                    if start_close != 0:
-                        reversal_pct = (closes[-1] - start_close) / start_close * 100
-
-            # 技术指标
-            macd_dif, macd_dea, macd_hist = calculate_macd(closes)
-            bb_upper, bb_middle, bb_lower = calculate_bollinger(closes, 10, 1.5)
-
-            iv_data = {
-                "name": interval_name,
-                "interval": interval,
-                "trend": trend,
-                "consecutive": consecutive,
-                "ma10": round(valid_ma[-1], 4) if valid_ma else None,
-                "close": round(closes[-1], 4),
-                "deviation": round(deviation, 2),
-                "consecutive_dev_avg": consecutive_dev_avg,
-                "consecutive_dev_max": consecutive_dev_max,
-                "reversal_pct": round(reversal_pct, 2) if reversal_pct is not None else None,
-                "candles_count": len(klines),
-                "ma_series": [round(v, 2) for v in recent_ma] if recent_ma else [],
-                "volume": round(volume, 2),
-                "prev_volume": round(prev_volume, 2),
-                "prev_high": round(prev_high, 4),
-                "prev_low": round(prev_low, 4) if prev_low != float("inf") else float("inf"),
-                "macd": {
-                    "dif": round(macd_dif[-1], 4) if macd_dif[-1] is not None else None,
-                    "dea": round(macd_dea[-1], 4) if macd_dea[-1] is not None else None,
-                    "histogram": round(macd_hist[-1], 4) if macd_hist[-1] is not None else None,
-                } if macd_dif[-1] is not None else None,
-                "bollinger": {
-                    "upper": round(bb_upper[-1], 4) if bb_upper[-1] is not None else None,
-                    "middle": round(bb_middle[-1], 4) if bb_middle[-1] is not None else None,
-                    "lower": round(bb_lower[-1], 4) if bb_lower[-1] is not None else None,
-                } if bb_upper[-1] is not None else None,
-            }
+            iv_data = self._process_interval(contract, interval, interval_name, session)
             result["intervals"].append(iv_data)
 
         return result

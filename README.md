@@ -1,11 +1,11 @@
-# Gate.io MA10 趋势监控系统 v2.0
+# Gate.io MA10 趋势监控系统 v2.1
 
 基于 **Gate.io U本位永续合约 API** 的 MA10（10周期移动平均线）趋势监控系统。支持 **Web 可视化面板** 和 **命令行脚本**，实时监控加密货币与美股代币的多周期趋势。
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-2.0%2B-green)](https://flask.palletsprojects.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-v2.1.3-brightgreen)](.)
+[![Version](https://img.shields.io/badge/Version-v2.1.4-brightgreen)](.)
 
 ---
 
@@ -37,10 +37,12 @@
 
 ### 性能与架构
 - **模块化架构**：app.py / monitor.py / alerts.py / state.py / templates/index.html 五模块独立
-- **SQLite K线缓存**：历史 K线本地持久化，API 调用量减半（500 → ~200 次/刷新）
+- **SQLite K线缓存**：历史 K线本地持久化，API 调用量减半（500 → ~200 次/刷新），WAL 模式提升并发
+- **Gzip 压缩**：JSON 响应自动压缩，/api/data ~150KB → ~25KB，节省 85% 带宽
+- **SOCKS5 代理**：仅 Gate.io API 走代理通道，不影响系统网络
 - **连接池复用**：线程级 requests.Session 连接池，避免重复 TCP 握手
 - **原子写入**：状态文件 `tempfile + os.replace` 防止崩溃损坏
-- **API 限流保护**：响应类型检查 + 3 次重试退避，优雅处理限流
+- **API 限流保护**：全局信号量（Semaphore 4）+ 请求延迟，稳定 ~13 req/s；类型检查 + 3 次重试退避
 
 ---
 
@@ -74,7 +76,7 @@ python gateio_futures_monitor.py
 ```
 美股数字货币监控项目/
 ├── app.py                          # Flask 路由 + SSE + 启动逻辑 (~300 行)
-├── monitor.py                      # MonitorCore + 指标计算 (MACD/RSI/BB)
+├── monitor.py                      # MonitorCore + 指标计算 (MA/BB) + 代理/限流
 ├── alerts.py                       # 转折预警 / 背离检测 / 企微推送
 ├── state.py                        # 状态持久化 / SQLite 缓存
 ├── templates/
@@ -172,6 +174,20 @@ python gateio_futures_monitor.py
 
 ---
 
+## SOCKS5 代理配置
+
+如需通过代理访问 Gate.io API（不影响系统网络），编辑 `monitor.py`：
+
+```python
+# 设置代理地址（V2Ray/Xray/Clash 等）
+PROXY_URL = "socks5://127.0.0.1:10808"
+
+# 不走代理则设为 None
+PROXY_URL = None
+```
+
+代理仅对 Gate.io API 生效，系统其他网络请求不受影响。需安装 PySocks：`pip install PySocks`
+
 ## 企业微信推送
 
 编辑 `alerts.py` 中的 `WECOM_WEBHOOK_URL`：
@@ -186,6 +202,7 @@ WECOM_WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的
 
 | 日期 | 版本 | 内容 |
 |------|------|------|
+| 2026-05-31 | v2.1.4 | SOCKS5 代理支持（API 走代理/上网直连）；限流优化（Semaphore 4 + 0.06s 延迟，消除 TOO_MANY_REQUESTS）；连续周期计数修复（K线 200 根 + 浮点四舍五入 + 等值不中断）；Gzip 压缩 JSON 响应（节省 85%）；SQLite WAL 模式；MonitorCore 符号缓存；移除 MACD/EMA 死代码 |
 | 2026-05-30 | v2.1.3 | 连续周期筛选标签（1d≥10/4h≥20/1h≥30/15m≥40）AND 多选；极偏信号筛选（连续≥10 + 偏离=极偏 + 极偏≥均偏×2）；偏离/均偏/极偏仅在连续≥10 时显示 |
 | 2026-05-30 | v2.1.2 | 去除 RSI 指标（噪音多、易被操纵、与偏离/BB 语义重叠）；BB 仅在连续≥10 周期时触发显示；卡片去除 MA10 数值行；修复双偏离显示 bug |
 | 2026-05-30 | v2.1.1 | 布林带参数优化 BB(10, 1.5)：中轨对齐 MA10，带宽适配快速周期；修复 K线图布林带初次打开不渲染 bug（checkbox 状态同步）；卡片网格固定 3 列布局提升观感；指标标签更新为 BB(10,1.5) |

@@ -14,6 +14,9 @@ import logging
 import importlib.metadata
 from datetime import datetime, timedelta
 
+import gzip
+import io
+
 import requests
 from flask import Flask, jsonify, render_template, request, Response
 
@@ -33,6 +36,24 @@ PORT = 5000
 AUTO_REFRESH_INTERVAL = 300
 
 app = Flask(__name__)
+
+# Gzip 压缩 JSON 响应（>500 字节）
+@app.after_request
+def gzip_response(response):
+    if (response.content_type and "application/json" in response.content_type
+            and response.content_length is not None and response.content_length > 500):
+        accept_encoding = request.headers.get("Accept-Encoding", "")
+        if "gzip" not in accept_encoding:
+            return response
+        response.direct_passthrough = False
+        buf = io.BytesIO()
+        with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=4) as gz:
+            gz.write(response.get_data())
+        response.set_data(buf.getvalue())
+        response.headers["Content-Encoding"] = "gzip"
+        response.headers["Content-Length"] = response.content_length
+        response.headers["Vary"] = "Accept-Encoding"
+    return response
 
 # 全局缓存
 cache = {

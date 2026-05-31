@@ -6,3 +6,6 @@ flask>=2.0.0
 
 # HTTP请求
 requests>=2.25.0
+
+# SOCKS5 代理支持（用于 Gate.io API 代理访问）
+PySocks>=1.7.0
