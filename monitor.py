@@ -1,5 +1,5 @@
 """
-Gate.io U本位合约 数据获取 + MA/MACD/布林带 计算
+Gate.io U本位合约 数据获取 + MA 计算
 """
 import json
 import os
@@ -17,14 +17,15 @@ KLINES_LIMIT = 200
 
 # SOCKS5 代理（仅用于 Gate.io API，不影响系统网络）
 # 设为 None 则不使用代理，走直连
-PROXY_URL = "socks5://127.0.0.1:10808"
+# 示例: PROXY_URL = "socks5://127.0.0.1:10808"
+PROXY_URL = None
 
 # 线程本地 Session（连接池复用）
 _session_local = threading.local()
 
-# 全局 API 并发限流（Gate.io 约 20 req/s 限流）
-_api_sem = threading.Semaphore(4)
-REQUEST_DELAY = 0.06
+# 全局 API 并发限流（Gate.io 公开 API 约 20 req/s，安全阈值 ~10 req/s）
+_api_sem = threading.Semaphore(5)
+REQUEST_DELAY = 0.10
 
 
 def get_session() -> requests.Session:
@@ -38,29 +39,6 @@ def get_session() -> requests.Session:
             s.proxies = {"http": PROXY_URL, "https": PROXY_URL}
         _session_local.session = s
     return _session_local.session
-
-
-# ========== 技术指标计算 ==========
-
-def calculate_bollinger(
-    closes: List[float], period: int = 20, k: float = 2.0
-) -> Tuple[List[Optional[float]], List[Optional[float]], List[Optional[float]]]:
-    """返回 (upper, middle, lower)"""
-    n = len(closes)
-    upper = [None] * n
-    middle = [None] * n
-    lower = [None] * n
-    if n < period:
-        return upper, middle, lower
-    for i in range(period - 1, n):
-        window = closes[i - period + 1 : i + 1]
-        mean = sum(window) / period
-        variance = sum((x - mean) ** 2 for x in window) / period
-        std = variance ** 0.5
-        middle[i] = mean
-        upper[i] = mean + k * std
-        lower[i] = mean - k * std
-    return upper, middle, lower
 
 
 # ========== MonitorCore ==========
@@ -116,7 +94,11 @@ class MonitorCore:
                 if isinstance(data, list):
                     return data
                 last_error = data
-                time.sleep(1.0 * (attempt + 1))
+                # 限流错误等更久，普通错误线性退避
+                if isinstance(data, dict) and "TOO_MANY_REQUESTS" in str(data.get("label", "")):
+                    time.sleep(3.0 * (attempt + 1))
+                else:
+                    time.sleep(1.0 * (attempt + 1))
             except Exception as e:
                 last_error = str(e)
                 time.sleep(0.5 * (attempt + 1))
@@ -175,8 +157,8 @@ class MonitorCore:
         empty = {
             "name": interval_name, "interval": interval,
             "trend": "数据不足", "consecutive": 0,
-            "ma10": None, "close": None, "deviation": None,
-            "consecutive_dev_avg": None, "consecutive_dev_max": None,
+            "ma10": None, "close": None,
+            "reversal_pct": None,
             "candles_count": len(klines) if klines else 0,
         }
         if not klines or len(klines) < 20:
@@ -187,26 +169,6 @@ class MonitorCore:
         ma10 = self.calculate_ma(closes, period=10)
         valid_ma = [v for v in ma10 if v is not None]
         trend, consecutive, recent_ma = self.analyze_trend(ma10, min_consecutive=3)
-        deviation = (
-            (closes[-1] - valid_ma[-1]) / valid_ma[-1] * 100 if valid_ma else 0
-        )
-
-        # 连续周期的偏离统计（均偏、极偏）
-        consecutive_dev_avg = None
-        consecutive_dev_max = None
-        if trend in ("连续上涨", "连续下跌") and consecutive > 0 and valid_ma:
-            dev_series = []
-            for i in range(len(closes)):
-                if ma10[i] is not None and ma10[i] != 0:
-                    dev_series.append((closes[i] - ma10[i]) / ma10[i] * 100)
-                else:
-                    dev_series.append(None)
-            n = min(consecutive + 1, len(dev_series))
-            devs = [d for d in dev_series[-n:] if d is not None]
-            if devs:
-                consecutive_dev_avg = round(sum(devs) / len(devs), 2)
-                consecutive_dev_max = round(max(abs(d) for d in devs), 2)
-
         cur_k = klines_sorted[-1]
         prev_k = klines_sorted[-2] if len(klines_sorted) >= 2 else None
         volume = float(cur_k["v"])
@@ -215,13 +177,11 @@ class MonitorCore:
         prev_low = float(prev_k["l"]) if prev_k else float("inf")
 
         reversal_pct = None
-        if 1 <= consecutive <= 3 and trend not in ("数据不足", "震荡"):
+        if consecutive >= 1 and trend not in ("数据不足", "震荡"):
             if len(closes) >= consecutive + 2:
                 start_close = closes[-consecutive - 1]
                 if start_close != 0:
                     reversal_pct = (closes[-1] - start_close) / start_close * 100
-
-        bb_upper, bb_middle, bb_lower = calculate_bollinger(closes, 10, 1.5)
 
         return {
             "name": interval_name,
@@ -230,9 +190,6 @@ class MonitorCore:
             "consecutive": consecutive,
             "ma10": round(valid_ma[-1], 4) if valid_ma else None,
             "close": round(closes[-1], 4),
-            "deviation": round(deviation, 2),
-            "consecutive_dev_avg": consecutive_dev_avg,
-            "consecutive_dev_max": consecutive_dev_max,
             "reversal_pct": round(reversal_pct, 2) if reversal_pct is not None else None,
             "candles_count": len(klines),
             "ma_series": [round(v, 2) for v in recent_ma] if recent_ma else [],
@@ -240,11 +197,6 @@ class MonitorCore:
             "prev_volume": round(prev_volume, 2),
             "prev_high": round(prev_high, 4),
             "prev_low": round(prev_low, 4) if prev_low != float("inf") else float("inf"),
-            "bollinger": {
-                "upper": round(bb_upper[-1], 4) if bb_upper[-1] is not None else None,
-                "middle": round(bb_middle[-1], 4) if bb_middle[-1] is not None else None,
-                "lower": round(bb_lower[-1], 4) if bb_lower[-1] is not None else None,
-            } if bb_upper[-1] is not None else None,
         }
 
     def _fetch_symbol_data(self, sym_info: Dict) -> Dict:
@@ -255,7 +207,7 @@ class MonitorCore:
 
         session = get_session()
 
-        # Ticker
+        # Ticker（带限流保护）
         ticker = self.fetch_ticker(contract, session)
         if ticker:
             result["last"] = float(ticker.get("last", 0))
@@ -284,7 +236,7 @@ class MonitorCore:
         total = len(self.symbols)
         if total == 0:
             return results
-        workers = min(5, max(3, total // 10))
+        workers = min(5, max(3, total // 20))
         print(f"[SYNC] Acquiring market data stream (parallel mode, {workers} workers)...")
 
         progress_lock = threading.Lock()

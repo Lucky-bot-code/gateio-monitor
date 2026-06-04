@@ -1,11 +1,11 @@
-# Gate.io MA10 趋势监控系统 v2.1
+# Gate.io MA10 趋势监控系统 v2.2
 
 基于 **Gate.io U本位永续合约 API** 的 MA10（10周期移动平均线）趋势监控系统。支持 **Web 可视化面板** 和 **命令行脚本**，实时监控加密货币与美股代币的多周期趋势。
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-2.0%2B-green)](https://flask.palletsprojects.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-v2.1.4-brightgreen)](.)
+[![Version](https://img.shields.io/badge/Version-v2.2.0-brightgreen)](.)
 
 ---
 
@@ -14,14 +14,12 @@
 ### 核心监控
 - **四周期趋势**：日K、4小时、60分钟、15分钟 MA10 趋势方向 + sparkline 走势小图
 - **成交额前100标的**：自动按 Gate.io 24h 成交额排名取前 100 个 USDT 合约
-- **技术指标**：偏离率 + 均偏/极偏（连续≥10触发）、布林带（BB 10/1.5，连续≥10触发），卡片内紧凑展示；K线图模态框内可叠加 MACD/布林带
-- **K线图表**：点击卡片弹出交互式 K线图（TradingView lightweight-charts），支持周期切换 + 指标叠加
+- **技术指标**：连续周期总涨跌幅（卡片展示）；MA10 + SAR（K线图叠加），趋势跟踪双重确认
+- **K线图表**：点击卡片弹出交互式 K线图（TradingView lightweight-charts），支持周期切换 + MA10/SAR 指标叠加
 
 ### 预警与通知
-- **趋势转折预警**：MA10 转折时自动检测，含强度条件过滤；按周期边界精确调度
 - **多周期背离信号**：大周期连续 ≥10 同向 + 小周期反向 + 价格确认，三层检测
 - **价格提醒**：每标的可设置突破/跌破价格阈值，触发后高亮脉冲闪烁
-- **企业微信推送**：转折预警 + 持仓预警自动推送
 
 ### 交互与体验
 - **SSE 实时推送**：后端数据刷新后主动推送到前端，60s 轮询降级备用
@@ -32,7 +30,6 @@
 - **标的管理**：输入简称（如 `btc`）自动推导完整合约名，实时验证 Gate.io 合约是否存在，无需修改 JSON 文件
 - **搜索 + 排序**：实时搜索过滤，按持仓/成交额/涨跌幅多维度排序
 - **连续周期筛选**：四周期独立阈值标签（1d≥10 / 4h≥20 / 1h≥30 / 15m≥40），多选 AND 逻辑
-- **极偏信号筛选**：连续≥10 + 偏离=极偏 + 极偏≥均偏×2，末端加速标的
 - **移动端适配**：底部导航栏，响应式网格布局，手机/电脑均可使用
 
 ### 性能与架构
@@ -42,7 +39,7 @@
 - **SOCKS5 代理**：仅 Gate.io API 走代理通道，不影响系统网络
 - **连接池复用**：线程级 requests.Session 连接池，避免重复 TCP 握手
 - **原子写入**：状态文件 `tempfile + os.replace` 防止崩溃损坏
-- **API 限流保护**：全局信号量（Semaphore 4）+ 请求延迟，稳定 ~13 req/s；类型检查 + 3 次重试退避
+- **API 限流保护**：全局信号量（Semaphore 5）+ 请求延迟，稳定 ~10 req/s；类型检查 + 3 次重试退避
 
 ---
 
@@ -75,17 +72,16 @@ python gateio_futures_monitor.py
 
 ```
 美股数字货币监控项目/
-├── app.py                          # Flask 路由 + SSE + 启动逻辑 (~300 行)
-├── monitor.py                      # MonitorCore + 指标计算 (MA/BB) + 代理/限流
-├── alerts.py                       # 转折预警 / 背离检测 / 企微推送
-├── state.py                        # 状态持久化 / SQLite 缓存
+├── app.py                          # Flask 路由 + SSE + 启动逻辑
+├── monitor.py                      # MonitorCore + MA/SAR 计算 + 代理/限流
+├── alerts.py                       # 多周期背离检测
+├── state.py                        # 持仓/价格提醒持久化 + SQLite 缓存
 ├── templates/
 │   └── index.html                  # 完整前端 (暗色/亮色主题 + K线图)
 ├── gateio_available_symbols.json   # 当前监控标的列表 (100 个)
 ├── gateio_futures_monitor.py       # 命令行版监控脚本
 ├── gateio_futures_scan.py          # Gate.io 合约扫描器
 ├── klines.db                       # [运行时] SQLite K线缓存
-├── .ma10_state.json                # [运行时] 转折预警状态
 ├── positions.json                  # [运行时] 持仓标记
 ├── price_alerts.json               # [运行时] 价格提醒
 ├── requirements.txt                # flask + requests
@@ -102,7 +98,6 @@ python gateio_futures_monitor.py
 | 区域 | 内容 |
 |------|------|
 | **顶部栏** | 标题 / 连接状态指示器 / 主题切换 / 更新时间 / 刷新按钮 + 倒计时 |
-| **预警栏** | 转折预警 badge（点击跳转） / 持仓预警 badge |
 | **标签页** | 「监控面板」— 卡片网格；「周期背离」— 背离信号列表；「管理」— 标的管理 + 价格提醒 |
 | **搜索栏** | 实时过滤 + 排序下拉（持仓优先/成交额/涨跌幅） |
 | **统计栏** | 各周期上涨/下跌数量统计 |
@@ -111,11 +106,11 @@ python gateio_futures_monitor.py
 ### 卡片内容
 
 - **持仓标记**（左上）：点击弹出多/空/无下拉菜单
-- **背离/预警 badge**：有背离信号或转折预警时显示
+- **背离 badge**：有背离信号时显示
 - **价格提醒铃铛** 🔔：点击设置突破/跌破阈值
 - **右上**：最新价 + 24h 涨跌幅 + 24h 成交额
-- **四格趋势**：日K / 4h / 1h / 15m 趋势状态 + sparkline + 偏离率 / 均偏 / 极偏 / RSI6 / %B
-- **点击卡片**：打开 K线图表模态框（支持 MA10/MACD/RSI/布林带 指标叠加）
+- **四格趋势**：日K / 4h / 1h / 15m 趋势状态 + sparkline + 连续周期总涨跌幅
+- **点击卡片**：打开 K线图表模态框（支持 MA10 + SAR 指标叠加）
 
 ### 趋势颜色编码
 
@@ -154,7 +149,7 @@ python gateio_futures_monitor.py
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/` | GET | 渲染主页面 |
-| `/api/data` | GET | 监控数据（含指标、背离、预警、价格提醒） |
+| `/api/data` | GET | 监控数据（含指标、背离、价格提醒） |
 | `/api/divergence` | GET | 背离信号列表 |
 | `/api/refresh` | POST | 触发后台数据刷新 |
 | `/api/positions` | GET | 获取持仓标记 |
@@ -188,21 +183,12 @@ PROXY_URL = None
 
 代理仅对 Gate.io API 生效，系统其他网络请求不受影响。需安装 PySocks：`pip install PySocks`
 
-## 企业微信推送
-
-编辑 `alerts.py` 中的 `WECOM_WEBHOOK_URL`：
-
-```python
-WECOM_WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的key"
-```
-
----
-
 ## 更新日志
 
 | 日期 | 版本 | 内容 |
 |------|------|------|
-| 2026-05-31 | v2.1.4 | SOCKS5 代理支持（API 走代理/上网直连）；限流优化（Semaphore 4 + 0.06s 延迟，消除 TOO_MANY_REQUESTS）；连续周期计数修复（K线 200 根 + 浮点四舍五入 + 等值不中断）；Gzip 压缩 JSON 响应（节省 85%）；SQLite WAL 模式；MonitorCore 符号缓存；移除 MACD/EMA 死代码 |
+| 2026-06-04 | **v2.2.0** | 去除布林带（卡片/服务端/K线图全部移除）；偏离/均偏/极偏替换为连续周期总涨跌幅（不限周期数）；K线图引入 SAR 抛物线转向指标（AF 0.02/0.02/0.20），剔除 MACD；移除转折预警 + 持仓预警 + 企微推送；alerts.py 精简为仅背离检测；state.py 移除 MA10 状态持久化 |
+| 2026-05-31 | v2.1.4 | SOCKS5 代理支持（API 走代理/上网直连）；限流优化；连续周期计数修复；Gzip 压缩 JSON 响应；SQLite WAL 模式；MonitorCore 符号缓存 |
 | 2026-05-30 | v2.1.3 | 连续周期筛选标签（1d≥10/4h≥20/1h≥30/15m≥40）AND 多选；极偏信号筛选（连续≥10 + 偏离=极偏 + 极偏≥均偏×2）；偏离/均偏/极偏仅在连续≥10 时显示 |
 | 2026-05-30 | v2.1.2 | 去除 RSI 指标（噪音多、易被操纵、与偏离/BB 语义重叠）；BB 仅在连续≥10 周期时触发显示；卡片去除 MA10 数值行；修复双偏离显示 bug |
 | 2026-05-30 | v2.1.1 | 布林带参数优化 BB(10, 1.5)：中轨对齐 MA10，带宽适配快速周期；修复 K线图布林带初次打开不渲染 bug（checkbox 状态同步）；卡片网格固定 3 列布局提升观感；指标标签更新为 BB(10,1.5) |

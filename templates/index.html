@@ -220,30 +220,6 @@
             padding: 14px; border-radius: 8px; margin: 20px;
             border: 1px solid var(--down);
         }
-        .alert-bar {
-            display: none; padding: 10px 20px; gap: 8px;
-            flex-wrap: wrap; align-items: center;
-        }
-        .alert-bar.active { display: flex; }
-        .alert-bar.alert-down { background: rgba(220, 38, 38, 0.15); border-bottom: 1px solid rgba(220, 38, 38, 0.3); }
-        .alert-bar.alert-up { background: rgba(5, 150, 105, 0.15); border-bottom: 1px solid rgba(5, 150, 105, 0.3); }
-        .alert-bar.alert-mixed { background: rgba(59, 130, 246, 0.15); border-bottom: 1px solid rgba(59, 130, 246, 0.3); }
-        .alert-badge {
-            display: inline-flex; align-items: center; gap: 5px;
-            padding: 3px 9px; border-radius: 5px;
-            font-size: 0.7rem; font-weight: 600;
-            cursor: pointer; transition: opacity 0.2s, transform 0.2s;
-        }
-        .alert-badge:hover { opacity: 0.85; transform: translateY(-1px); }
-        .alert-badge.down { background: var(--down-bg); color: var(--down); border: 1px solid var(--down); }
-        .alert-badge.up { background: var(--up-bg); color: var(--up); border: 1px solid var(--up); }
-        .card-alert {
-            margin-bottom: 8px; padding: 6px 9px; border-radius: 5px;
-            font-size: 0.7rem; font-weight: 600;
-            display: flex; align-items: center; gap: 5px;
-        }
-        .card-alert.down { background: rgba(220, 38, 38, 0.2); color: #fca5a5; border: 1px solid rgba(220, 38, 38, 0.4); }
-        .card-alert.up { background: rgba(5, 150, 105, 0.2); color: #6ee7b7; border: 1px solid rgba(5, 150, 105, 0.4); }
         .tabs {
             display: flex; gap: 0;
             background: var(--bg-secondary); border-bottom: 1px solid var(--border);
@@ -505,15 +481,6 @@
         <div class="stat">15m下跌: <span id="statMinDown">-</span></div>
     </div>
 
-    <div class="alert-bar" id="alertBar">
-        <div style="font-weight:600; font-size:0.75rem; margin-right:6px;">转折预警:</div>
-        <div id="alertList" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
-    </div>
-
-    <div class="alert-bar" id="posAlertBar">
-        <div style="font-weight:600; font-size:0.75rem; margin-right:6px; color:var(--accent);">持仓预警:</div>
-        <div id="posAlertList" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
-    </div>
 
     <div class="container">
         <div id="loading" class="loading">
@@ -602,8 +569,7 @@
             <div id="chartContainer"></div>
             <div class="modal-indicators">
                 <label><input type="checkbox" id="chkMA10" checked onchange="toggleChartIndicator('ma10', this.checked)"> MA10</label>
-                <label><input type="checkbox" id="chkMACD" onchange="toggleChartIndicator('macd', this.checked)"> MACD</label>
-                <label><input type="checkbox" id="chkBB" onchange="toggleChartIndicator('bb', this.checked)"> 布林带</label>
+                <label><input type="checkbox" id="chkSAR" checked onchange="toggleChartIndicator('sar', this.checked)"> SAR</label>
             </div>
         </div>
     </div>
@@ -626,13 +592,11 @@
         let countdownRemaining = 300;
         let countdownTimer;
         let dataCache = null;
-        let alertsCache = [];
         let currentSearchQuery = '';
         let currentSort = 'position';
         const POSITIONS_KEY = 'ma10_positions';
         let positionsCache = {};
         let divergenceCache = null;
-        let positionAlertsCache = [];
         let eventSource = null;
         let sseConnected = false;
         let pollFallbackTimer = null;
@@ -678,11 +642,9 @@
         function handleServerUpdate(payload) {
             if (payload.error) return;
             dataCache = payload.data;
-            alertsCache = payload.alerts || [];
             divergenceCache = payload.divergence || [];
-            positionAlertsCache = payload.position_alerts || [];
             if (payload.data && payload.data.length > 0) {
-                renderCards(dataCache, alertsCache);
+                renderCards(dataCache);
                 if (payload.price_alerts) {
                     priceAlertsCache = payload.price_alerts;
                     updateAllPriceBellStates();
@@ -771,7 +733,7 @@
 
         function onSortChange() {
             currentSort = document.getElementById('sortSelect').value;
-            if (dataCache) renderCards(dataCache, alertsCache);
+            if (dataCache) renderCards(dataCache);
         }
 
         // ====== Tabs ======
@@ -997,53 +959,22 @@
 
         function formatIndicators(iv) {
             var parts = [];
-            if (iv.consecutive >= 10 && iv.deviation !== null && iv.deviation !== undefined) {
-                var d = iv.deviation;
-                var absD = Math.abs(d);
-                var dCls = absD >= 5 ? 'ind-strong' : (absD >= 2 ? 'ind-moderate' : '');
-                var dSign = d > 0 ? '+' : '';
-                var dDir = d > 0 ? 'ind-down' : 'ind-up';
-                var dClsFinal = absD >= 2 ? dDir + ' ' + dCls : dCls;
-                parts.push('偏离:<span class="' + dClsFinal + '">' + dSign + d.toFixed(1) + '%</span>');
-            }
-            if (iv.consecutive >= 10 && iv.consecutive_dev_avg !== null && iv.consecutive_dev_avg !== undefined) {
-                var ca = iv.consecutive_dev_avg;
-                var caSign = ca > 0 ? '+' : '';
-                var caCls = ca > 0 ? 'ind-down' : 'ind-up';
-                parts.push('均偏:<span class="' + caCls + '">' + caSign + ca.toFixed(1) + '%</span>');
-            }
-            if (iv.consecutive >= 10 && iv.consecutive_dev_max !== null && iv.consecutive_dev_max !== undefined) {
-                var cm = iv.consecutive_dev_max;
-                var isMax = Math.abs(Math.abs(iv.deviation) - cm) < 0.01;
-                var cmCls = isMax ? 'ind-gold' : (cm >= 5 ? 'ind-strong' : '');
-                parts.push('极偏:<span class="' + cmCls + '">' + cm.toFixed(1) + '%</span>');
-            }
-            if (iv.consecutive >= 10 && iv.bollinger && iv.bollinger.upper !== null) {
-                var bb = iv.bollinger;
-                var pctB = iv.close !== null ? ((iv.close - bb.lower) / (bb.upper - bb.lower) * 100) : null;
-                var bbCls = '';
-                if (pctB !== null) {
-                    if (pctB > 100) bbCls = 'ind-down ind-strong';
-                    else if (pctB < 0) bbCls = 'ind-up ind-strong';
-                    else if (pctB > 80) bbCls = 'ind-down';
-                    else if (pctB < 20) bbCls = 'ind-up';
-                    parts.push('BB(10,1.5):<span class="' + bbCls + '">' + pctB.toFixed(0) + '%</span>');
-                }
+            if (iv.consecutive >= 1 && iv.reversal_pct !== null && iv.reversal_pct !== undefined) {
+                var rp = iv.reversal_pct;
+                var rpDir = rp > 0 ? 'ind-down' : 'ind-up';
+                var rpSign = rp > 0 ? '+' : '';
+                var rpCls = Math.abs(rp) >= 5 ? 'ind-strong' : '';
+                parts.push('<span class="' + rpDir + ' ' + rpCls + '">' + rpSign + rp.toFixed(1) + '%</span>');
             }
             return parts.length > 0 ? parts.join(' ') : '';
         }
 
         // ====== Render Cards ======
-        function renderCards(data, alerts) {
+        function renderCards(data) {
             var grid = document.getElementById('grid');
             var html = '';
             var stats = { total: data.length, dayUp: 0, dayDown: 0, fourHUp: 0, fourHDown: 0, hourUp: 0, hourDown: 0, minUp: 0, minDown: 0 };
             var positions = loadPositions();
-            var symAlerts = {};
-            alerts.forEach(function(a) {
-                if (!symAlerts[a.symbol]) symAlerts[a.symbol] = [];
-                symAlerts[a.symbol].push(a);
-            });
             var symDivergence = {};
             (divergenceCache || []).forEach(function(d) {
                 if (!symDivergence[d.symbol]) symDivergence[d.symbol] = [];
@@ -1102,18 +1033,6 @@
                     }
                 });
 
-                var alertsForItem = symAlerts[item.symbol] || [];
-                var cardAlertsHtml = '';
-                alertsForItem.forEach(function(a) {
-                    var cls = a.type === 'reversal_up' ? 'up' : 'down';
-                    var arrow = a.type === 'reversal_up' ? '↑' : '↓';
-                    var text = a.type === 'reversal_up' ? '上涨转折' : '下跌转折';
-                    var pct = a.reversal_pct != null ? ' 累计' + (a.reversal_pct > 0 ? '+' : '') + a.reversal_pct + '%' : '';
-                    var cond = escapeHtml(a.condition);
-                    var condStr = cond ? ' [' + cond + ']' : '';
-                    cardAlertsHtml += '<div class="card-alert ' + cls + '">' + arrow + ' ' + a.interval + text + ' (已' + a.consecutive + '周期)' + pct + condStr + '</div>';
-                });
-
                 var posLabel = pos ? (pos === 'long' ? '多' : '空') : '';
                 var posClass = pos || '';
                 var cardClass = pos ? 'card ' + pos : 'card';
@@ -1131,20 +1050,12 @@
                 }
 
                 var consData = '';
-                var hasExtreme = false;
                 item.intervals.forEach(function(iv) {
                     var ikey = iv.interval === '1d' ? '1d' : (iv.interval === '4h' ? '4h' : (iv.interval === '1h' ? '1h' : '15m'));
                     consData += ' data-c' + ikey + '="' + (iv.consecutive || 0) + '"';
-                    if (iv.consecutive >= 10 && iv.consecutive_dev_max !== null && iv.consecutive_dev_avg !== null && iv.deviation !== null &&
-                        Math.abs(Math.abs(iv.deviation) - iv.consecutive_dev_max) < 0.01 &&
-                        iv.consecutive_dev_max >= iv.consecutive_dev_avg * 2) {
-                        hasExtreme = true;
-                    }
                 });
-                consData += ' data-extreme="' + (hasExtreme ? '1' : '0') + '"';
                 html += '<div class="' + cardClass + '" id="card-' + item.symbol + '"' + consData + ' onclick="openChartModal(\'' + item.symbol + '\', \'1d\')">'
                     + '<span class="card-chart-icon" onclick="event.stopPropagation();openChartModal(\'' + item.symbol + '\', \'1d\')" title="打开K线图">📈</span>'
-                    + cardAlertsHtml
                     + '<div class="card-header">'
                     + '<div class="card-title"><span class="card-pos ' + posClass + '" onclick="showPositionDropdown(\'' + item.symbol + '\', event)" data-symbol="' + item.symbol + '" title="点击设置持仓">' + (posLabel || '＋') + '</span>'
                     + item.symbol + divBadgeHtml
@@ -1176,49 +1087,6 @@
             document.getElementById('statMinUp').textContent = stats.minUp;
             document.getElementById('statMinDown').textContent = stats.minDown;
 
-            // Alert bars
-            var alertBar = document.getElementById('alertBar');
-            var alertList = document.getElementById('alertList');
-            if (alerts.length > 0) {
-                var hasUp = false, hasDown = false;
-                var alertHtml = '';
-                alerts.forEach(function(a) {
-                    var cls = a.type === 'reversal_up' ? 'up' : 'down';
-                    var arrow = a.type === 'reversal_up' ? '↑' : '↓';
-                    var text = a.type === 'reversal_up' ? '上涨转折' : '下跌转折';
-                    var pct = a.reversal_pct != null ? ' ' + (a.reversal_pct > 0 ? '+' : '') + a.reversal_pct + '%' : '';
-                    var cond = escapeHtml(a.condition);
-                    var condStr = cond ? '[' + cond + ']' : '';
-                    alertHtml += '<span class="alert-badge ' + cls + '" onclick="scrollToCard(\'' + a.symbol + '\')" title="点击跳转">' + arrow + ' ' + a.symbol + ' ' + a.interval + text + pct + ' ' + condStr + '</span>';
-                    if (a.type === 'reversal_up') hasUp = true; else hasDown = true;
-                });
-                alertList.innerHTML = alertHtml;
-                alertBar.classList.add('active');
-                alertBar.classList.remove('alert-up', 'alert-down', 'alert-mixed');
-                if (hasUp && hasDown) alertBar.classList.add('alert-mixed');
-                else if (hasUp) alertBar.classList.add('alert-up');
-                else alertBar.classList.add('alert-down');
-            } else {
-                alertBar.classList.remove('active'); alertList.innerHTML = '';
-            }
-
-            var posAlertBar = document.getElementById('posAlertBar');
-            var posAlertList = document.getElementById('posAlertList');
-            if ((positionAlertsCache || []).length > 0) {
-                var phtml = '';
-                positionAlertsCache.forEach(function(a) {
-                    var cls = a.type === 'reversal_up' ? 'up' : 'down';
-                    var arrow = a.type === 'reversal_up' ? '↑' : '↓';
-                    var text = a.type === 'reversal_up' ? '上涨转折' : '下跌转折';
-                    var pl = a.position === 'long' ? '多' : '空';
-                    var pct = a.reversal_pct != null ? ' ' + (a.reversal_pct > 0 ? '+' : '') + a.reversal_pct + '%' : '';
-                    phtml += '<span class="alert-badge ' + cls + '" onclick="scrollToCard(\'' + a.symbol + '\')">' + arrow + ' ' + a.symbol + ' ' + a.interval + text + ' (' + pl + ')' + pct + '</span>';
-                });
-                posAlertList.innerHTML = phtml;
-                posAlertBar.classList.add('active');
-            } else {
-                posAlertBar.classList.remove('active'); posAlertList.innerHTML = '';
-            }
         }
 
         // ====== Data loading ======
@@ -1358,7 +1226,7 @@
 
             var candleData = klines.map(function(k) {
                 return {
-                    time: parseInt(k.t) / 1000,
+                    time: parseInt(k.t),
                     open: parseFloat(k.o),
                     high: parseFloat(k.h),
                     low: parseFloat(k.l),
@@ -1384,16 +1252,15 @@
                 return v !== null ? { time: candleData[i].time, value: v } : null;
             }).filter(Boolean));
 
-            // MACD (stored for toggle)
-            chartSeries._macdData = calcMACD(closes);
-            chartSeries._bbData = calcBB(closes, 10, 1.5);
-
+            // SAR (stored for toggle)
+            var highs = klines.map(function(k) { return parseFloat(k.h); });
+            var lows = klines.map(function(k) { return parseFloat(k.l); });
+            chartSeries._sarData = calcSAR(highs, lows);
             // Sync indicator checkboxes with chart (fix: re-open loses checked state)
             setTimeout(function() {
                 var ma10Chk = document.getElementById('chkMA10');
                 if (ma10Chk && !ma10Chk.checked && chartSeries.ma10) chartSeries.ma10.applyOptions({ visible: false });
-                if (document.getElementById('chkMACD') && document.getElementById('chkMACD').checked) toggleChartIndicator('macd', true);
-                if (document.getElementById('chkBB') && document.getElementById('chkBB').checked) toggleChartIndicator('bb', true);
+                if (document.getElementById('chkSAR') && document.getElementById('chkSAR').checked) toggleChartIndicator('sar', true);
             }, 50);
 
             // Resize observer
@@ -1418,92 +1285,78 @@
             return sma;
         }
 
-        function calcMACD(closes) {
-            var ema12 = calcEMA(closes, 12);
-            var ema26 = calcEMA(closes, 26);
-            var dif = [], dea = [], hist = [];
-            for (var i = 0; i < closes.length; i++) {
-                if (ema12[i] !== null && ema26[i] !== null) dif.push(ema12[i] - ema26[i]); else dif.push(null);
-            }
-            var validDif = dif.filter(function(v) { return v !== null; });
-            var deaVals = calcEMA(validDif, 9);
-            var deaI = 0;
-            for (var i = 0; i < dif.length; i++) {
-                if (dif[i] !== null) { dea.push(deaVals[deaI] || null); hist.push((dif[i] - (deaVals[deaI] || 0)) * 2); deaI++; }
-                else { dea.push(null); hist.push(null); }
-            }
-            return { dif: dif, dea: dea, hist: hist };
-        }
+        function calcSAR(highs, lows, afStart, afStep, afMax) {
+            afStart = afStart || 0.02;
+            afStep = afStep || 0.02;
+            afMax = afMax || 0.20;
+            var n = highs.length;
+            var bull = new Array(n).fill(null);
+            var bear = new Array(n).fill(null);
+            if (n < 2) return { bull: bull, bear: bear };
 
-        function calcEMA(data, period) {
-            var k = 2 / (period + 1);
-            var ema = [];
-            for (var i = 0; i < data.length; i++) {
-                if (i < period - 1) { ema.push(null); }
-                else if (i === period - 1) {
-                    var sum = 0;
-                    for (var j = 0; j < period; j++) sum += data[j];
-                    ema.push(sum / period);
+            var isLong = true;
+            var sar = lows[0];
+            var ep = highs[0];
+            var af = afStart;
+            bull[0] = sar;
+
+            for (var i = 1; i < n; i++) {
+                if (isLong) {
+                    sar = sar + af * (ep - sar);
+                    if (i >= 1) sar = Math.min(sar, lows[i - 1]);
+                    if (i >= 2) sar = Math.min(sar, lows[i - 2]);
+                    if (lows[i] < sar) {
+                        isLong = false;
+                        sar = ep;
+                        ep = lows[i];
+                        af = afStart;
+                        bear[i] = sar;
+                    } else {
+                        bull[i] = sar;
+                        if (highs[i] > ep) { ep = highs[i]; af = Math.min(af + afStep, afMax); }
+                    }
                 } else {
-                    ema.push(data[i] * k + ema[i - 1] * (1 - k));
+                    sar = sar - af * (sar - ep);
+                    if (i >= 1) sar = Math.max(sar, highs[i - 1]);
+                    if (i >= 2) sar = Math.max(sar, highs[i - 2]);
+                    if (highs[i] > sar) {
+                        isLong = true;
+                        sar = ep;
+                        ep = highs[i];
+                        af = afStart;
+                        bull[i] = sar;
+                    } else {
+                        bear[i] = sar;
+                        if (lows[i] < ep) { ep = lows[i]; af = Math.min(af + afStep, afMax); }
+                    }
                 }
             }
-            return ema;
-        }
-
-        function calcBB(closes, period, k) {
-            var upper = [], middle = [], lower = [];
-            for (var i = 0; i < closes.length; i++) {
-                if (i < period - 1) { upper.push(null); middle.push(null); lower.push(null); }
-                else {
-                    var window = closes.slice(i - period + 1, i + 1);
-                    var mean = window.reduce(function(a, b) { return a + b; }, 0) / period;
-                    var variance = window.reduce(function(s, x) { return s + (x - mean) * (x - mean); }, 0) / period;
-                    var std = Math.sqrt(variance);
-                    middle.push(mean);
-                    upper.push(mean + k * std);
-                    lower.push(mean - k * std);
-                }
-            }
-            return { upper: upper, middle: middle, lower: lower };
+            return { bull: bull, bear: bear };
         }
 
         function toggleChartIndicator(name, show) {
             if (!chartInstance || !chartSeries.candles) return;
             if (name === 'ma10') {
                 if (chartSeries.ma10) chartSeries.ma10.applyOptions({ visible: show });
-            } else if (name === 'macd' && chartSeries._macdData) {
+            } else if (name === 'sar' && chartSeries._sarData) {
                 if (show) {
-                    if (!chartSeries._macdLine) {
+                    if (!chartSeries._sarMarkers) {
                         var timeData = chartSeries.candles.data().map(function(d) { return d.time; });
-                        chartSeries._macdLine = chartInstance.addLineSeries({ color: '#3b82f6', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-                        chartSeries._macdLine.setData(chartSeries._macdData.dif.map(function(v, i) { return v !== null ? { time: timeData[i], value: v } : null; }).filter(Boolean));
-                        chartSeries._macdSignal = chartInstance.addLineSeries({ color: '#ef4444', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-                        chartSeries._macdSignal.setData(chartSeries._macdData.dea.map(function(v, i) { return v !== null ? { time: timeData[i], value: v } : null; }).filter(Boolean));
+                        var markers = [];
+                        for (var i = 0; i < chartSeries._sarData.bull.length; i++) {
+                            if (chartSeries._sarData.bull[i] !== null) {
+                                markers.push({ time: timeData[i], position: 'belowBar', color: '#26a69a', shape: 'circle', size: 1 });
+                            } else if (chartSeries._sarData.bear[i] !== null) {
+                                markers.push({ time: timeData[i], position: 'aboveBar', color: '#ef5350', shape: 'circle', size: 1 });
+                            }
+                        }
+                        chartSeries._sarMarkers = markers;
+                        chartSeries.candles.setMarkers(markers);
                     } else {
-                        chartSeries._macdLine.applyOptions({ visible: true });
-                        chartSeries._macdSignal.applyOptions({ visible: true });
+                        chartSeries.candles.setMarkers(chartSeries._sarMarkers);
                     }
                 } else {
-                    if (chartSeries._macdLine) { chartSeries._macdLine.applyOptions({ visible: false }); chartSeries._macdSignal.applyOptions({ visible: false }); }
-                }
-            } else if (name === 'bb' && chartSeries._bbData) {
-                if (show) {
-                    if (!chartSeries._bbUpper) {
-                        var timeData = chartSeries.candles.data().map(function(d) { return d.time; });
-                        chartSeries._bbUpper = chartInstance.addLineSeries({ color: 'rgba(148,163,184,0.5)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-                        chartSeries._bbMiddle = chartInstance.addLineSeries({ color: 'rgba(148,163,184,0.8)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-                        chartSeries._bbLower = chartInstance.addLineSeries({ color: 'rgba(148,163,184,0.5)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-                        chartSeries._bbUpper.setData(chartSeries._bbData.upper.map(function(v, i) { return v !== null ? { time: timeData[i], value: v } : null; }).filter(Boolean));
-                        chartSeries._bbMiddle.setData(chartSeries._bbData.middle.map(function(v, i) { return v !== null ? { time: timeData[i], value: v } : null; }).filter(Boolean));
-                        chartSeries._bbLower.setData(chartSeries._bbData.lower.map(function(v, i) { return v !== null ? { time: timeData[i], value: v } : null; }).filter(Boolean));
-                    } else {
-                        chartSeries._bbUpper.applyOptions({ visible: true });
-                        chartSeries._bbMiddle.applyOptions({ visible: true });
-                        chartSeries._bbLower.applyOptions({ visible: true });
-                    }
-                } else {
-                    if (chartSeries._bbUpper) { chartSeries._bbUpper.applyOptions({ visible: false }); chartSeries._bbMiddle.applyOptions({ visible: false }); chartSeries._bbLower.applyOptions({ visible: false }); }
+                    chartSeries.candles.setMarkers([]);
                 }
             }
         }

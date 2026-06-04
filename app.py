@@ -20,13 +20,10 @@ import io
 import requests
 from flask import Flask, jsonify, render_template, request, Response
 
-from monitor import MonitorCore, get_session, BASE_URL, CONFIG_FILE
-from alerts import (
-    get_active_alert_intervals, check_reversal_strength,
-    analyze_divergence, build_alert_state, send_wecom_alert, _iter_reversals,
-)
+from monitor import MonitorCore, get_session, BASE_URL, CONFIG_FILE, _api_sem
+from alerts import analyze_divergence
 from state import (
-    load_prev_state, save_state, load_positions, save_positions,
+    load_positions, save_positions,
     load_price_alerts, save_price_alerts,
     init_db, get_cached_klines, store_klines,
 )
@@ -61,8 +58,6 @@ cache = {
     "last_update": None,
     "updating": False,
     "error": None,
-    "alerts": [],
-    "position_alerts": [],
     "divergence": [],
     "price_alerts": {},
 }
@@ -175,88 +170,10 @@ def refresh_data():
             print_progress(cur, total, sym)
 
         data = monitor.analyze_all(progress_callback=progress_cb)
-        prev_state = load_prev_state()
-        new_state = build_alert_state(data)
-        active_intervals = get_active_alert_intervals()
-        alerts = []
-        position_alerts = []
-
-        # 转折预警
-        for iv_name, item, rev, iv_data, prev_iv, new_iv in _iter_reversals(
-            prev_state, new_state, data, active_intervals
-        ):
-            cond = check_reversal_strength(iv_data, rev)
-            if cond:
-                alerts.append({
-                    "symbol": item["symbol"],
-                    "interval": iv_name,
-                    "type": rev,
-                    "prev_trend": prev_iv["trend"],
-                    "curr_trend": new_iv["trend"],
-                    "consecutive": new_iv["consecutive"],
-                    "reversal_pct": iv_data.get("reversal_pct"),
-                    "condition": cond,
-                })
-
-        # 持仓预警
-        for iv_name, item, rev, iv_data, prev_iv, new_iv in _iter_reversals(
-            prev_state, new_state, data, active_intervals
-        ):
-            sym = item["symbol"]
-            pos = user_positions.get(sym)
-            if pos and (
-                (pos == "long" and rev == "reversal_down")
-                or (pos == "short" and rev == "reversal_up")
-            ):
-                position_alerts.append({
-                    "symbol": sym,
-                    "interval": iv_name,
-                    "type": rev,
-                    "position": pos,
-                    "prev_trend": prev_iv["trend"],
-                    "curr_trend": new_iv["trend"],
-                    "consecutive": new_iv["consecutive"],
-                    "reversal_pct": iv_data.get("reversal_pct"),
-                })
 
         cache["data"] = data
-        cache["alerts"] = alerts
-        cache["position_alerts"] = position_alerts
         cache["divergence"] = analyze_divergence(data)
         cache["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        merged_state = dict(prev_state)
-        for iv_name in active_intervals:
-            if iv_name in new_state:
-                merged_state[iv_name] = new_state[iv_name]
-        save_state(merged_state)
-
-        if alerts:
-            print(f"\n{'='*60}")
-            print(f"  检测到 {len(alerts)} 个 MA10 转折预警")
-            print(f"{'='*60}")
-            for a in alerts:
-                arrow = "↓ 下跌转折" if a["type"] == "reversal_down" else "↑ 上涨转折"
-                pct_str = f" 累计{a['reversal_pct']:+.2f}%" if a.get("reversal_pct") is not None else ""
-                cond = a.get("condition", "")
-                cond_str = f" [{cond}]" if cond else ""
-                print(f"  [{a['symbol']}] {a['interval']} {arrow} (已{a['consecutive']}周期){pct_str}{cond_str}")
-                print(f"     前趋势: {a['prev_trend']} → 现趋势: {a['curr_trend']}")
-            print(f"{'='*60}\n")
-            send_wecom_alert(alerts, cache["last_update"])
-
-        if position_alerts:
-            print(f"\n{'='*60}")
-            print(f"  检测到 {len(position_alerts)} 个持仓预警")
-            print(f"{'='*60}")
-            for a in position_alerts:
-                pos_label = "做多" if a["position"] == "long" else "做空"
-                arrow = "↓ 下跌转折" if a["type"] == "reversal_down" else "↑ 上涨转折"
-                pct_str = f" 累计{a['reversal_pct']:+.2f}%" if a.get("reversal_pct") is not None else ""
-                print(f"  [{a['symbol']}] {a['interval']} {arrow} ({pos_label}){pct_str}")
-                print(f"     前趋势: {a['prev_trend']} → 现趋势: {a['curr_trend']}")
-            print(f"{'='*60}\n")
-            send_wecom_alert(position_alerts, cache["last_update"], alert_type="position")
 
         # 价格提醒检测
         triggered_alerts = []
@@ -296,8 +213,6 @@ def refresh_data():
         # SSE 推送
         sse_manager.publish({
             "data": cache["data"],
-            "alerts": cache["alerts"],
-            "position_alerts": cache["position_alerts"],
             "divergence": cache["divergence"],
             "price_alerts": cache["price_alerts"],
             "last_update": cache["last_update"],
@@ -365,8 +280,6 @@ def api_data():
         "last_update": cache["last_update"],
         "updating": cache["updating"],
         "error": cache["error"],
-        "alerts": cache["alerts"],
-        "position_alerts": cache["position_alerts"],
         "divergence": cache["divergence"],
         "price_alerts": user_price_alerts,
         "next_refresh_in": get_next_refresh_in(),
@@ -416,8 +329,6 @@ def api_stream():
             # 首次连接时发送当前缓存
             initial = {
                 "data": cache["data"],
-                "alerts": cache["alerts"],
-                "position_alerts": cache["position_alerts"],
                 "divergence": cache["divergence"],
                 "price_alerts": cache["price_alerts"],
                 "last_update": cache["last_update"],
@@ -477,14 +388,15 @@ def api_klines():
     if cached:
         return jsonify({"klines": cached, "symbol": symbol, "interval": interval, "source": "cache"})
 
-    # 从 API 获取
+    # 从 API 获取（带并发限流）
     try:
         s = get_session()
-        resp = s.get(
-            f"{BASE_URL}/futures/usdt/candlesticks",
-            params={"contract": contract, "interval": interval, "limit": limit},
-            timeout=15,
-        )
+        with _api_sem:
+            resp = s.get(
+                f"{BASE_URL}/futures/usdt/candlesticks",
+                params={"contract": contract, "interval": interval, "limit": limit},
+                timeout=15,
+            )
         klines = resp.json()
         if klines:
             store_klines(contract, interval, klines)

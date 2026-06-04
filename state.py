@@ -1,14 +1,22 @@
 """
-状态持久化：MA10 状态 / 持仓标记 / SQLite K线缓存
+状态持久化：持仓标记 / 价格提醒 / SQLite K线缓存
 """
 import json
 import os
 import sqlite3
 import sys
 import tempfile
+import time
 from typing import Dict, List, Optional
 
-ALERT_STATE_FILE = ".ma10_state.json"
+# K线缓存新鲜度阈值（秒），各周期取 2 倍周期长度
+CACHE_FRESHNESS = {
+    "1d": 172800,   # 2 天
+    "4h": 28800,    # 8 小时
+    "1h": 7200,     # 2 小时
+    "15m": 1800,    # 30 分钟
+}
+
 POSITIONS_FILE = "positions.json"
 PRICE_ALERTS_FILE = "price_alerts.json"
 DB_PATH = "klines.db"
@@ -24,30 +32,6 @@ def _atomic_write(path: str, data):
         os.replace(tmp, path)
     except Exception as e:
         print(f"[ERROR] Failed to write {path}: {e}", file=sys.stderr)
-
-
-# ========== MA10 状态持久化 ==========
-
-def load_prev_state() -> Dict[str, Dict]:
-    """加载上次保存的状态。仅支持 interval-first 格式。"""
-    empty: Dict[str, Dict] = {"日K": {}, "4小时": {}, "60分钟": {}, "15分钟": {}}
-    if not os.path.exists(ALERT_STATE_FILE):
-        return empty
-    try:
-        with open(ALERT_STATE_FILE, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-    except Exception:
-        return empty
-    if not raw:
-        return empty
-    for k in empty:
-        if k not in raw:
-            raw[k] = {}
-    return raw
-
-
-def save_state(state: Dict):
-    _atomic_write(ALERT_STATE_FILE, state)
 
 
 # ========== 持仓标记持久化 ==========
@@ -109,7 +93,8 @@ def init_db():
 
 
 def get_cached_klines(contract: str, interval: str, limit: int = 100) -> Optional[List[Dict]]:
-    """缓存命中返回 K线列表，否则返回 None"""
+    """缓存命中返回 K线列表，否则返回 None。
+    若最新一根 K 线超过新鲜度阈值，视为过期，返回 None 触发 API 刷新。"""
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -121,6 +106,11 @@ def get_cached_klines(contract: str, interval: str, limit: int = 100) -> Optiona
         ).fetchall()
         conn.close()
         if len(rows) >= limit:
+            # 检查最新 K 线是否在新鲜度阈值内
+            threshold = CACHE_FRESHNESS.get(interval, 7200)
+            latest_ts = rows[0]["timestamp"]
+            if time.time() - latest_ts > threshold:
+                return None
             klines = [dict(r) for r in reversed(rows)]
             # 转换字段名为 Gate.io API 格式
             return [
