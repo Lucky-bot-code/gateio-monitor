@@ -1,11 +1,11 @@
-# Gate.io MA10 趋势监控系统 v2.2
+# Gate.io MA10 趋势监控系统 v2.2.1
 
 基于 **Gate.io U本位永续合约 API** 的 MA10（10周期移动平均线）趋势监控系统。支持 **Web 可视化面板** 和 **命令行脚本**，实时监控加密货币与美股代币的多周期趋势。
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-2.0%2B-green)](https://flask.palletsprojects.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-v2.2.0-brightgreen)](.)
+[![Version](https://img.shields.io/badge/Version-v2.2.1-brightgreen)](.)
 
 ---
 
@@ -14,7 +14,7 @@
 ### 核心监控
 - **四周期趋势**：日K、4小时、60分钟、15分钟 MA10 趋势方向 + sparkline 走势小图
 - **成交额前100标的**：自动按 Gate.io 24h 成交额排名取前 100 个 USDT 合约
-- **技术指标**：连续周期总涨跌幅（卡片展示）；MA10 + SAR（K线图叠加），趋势跟踪双重确认
+- **技术指标**：连续周期总涨跌幅（卡片展示）；MA10 + SAR（K线图叠加），趋势跟踪双重确认；SAR 方向连续周期计数（卡片指标行展示）
 - **K线图表**：点击卡片弹出交互式 K线图（TradingView lightweight-charts），支持周期切换 + MA10/SAR 指标叠加
 
 ### 预警与通知
@@ -187,6 +187,7 @@ PROXY_URL = None
 
 | 日期 | 版本 | 内容 |
 |------|------|------|
+| 2026-06-04 | **v2.2.1** | SAR 方向连续周期计数：卡片每个周期格子展示 SAR↑N（上涨）/ SAR↓N（下跌），≥3 加粗高亮；与 MA10 连续周期并排展示，双重验证趋势强度 |
 | 2026-06-04 | **v2.2.0** | 去除布林带（卡片/服务端/K线图全部移除）；偏离/均偏/极偏替换为连续周期总涨跌幅（不限周期数）；K线图引入 SAR 抛物线转向指标（AF 0.02/0.02/0.20），剔除 MACD；移除转折预警 + 持仓预警 + 企微推送；alerts.py 精简为仅背离检测；state.py 移除 MA10 状态持久化 |
 | 2026-05-31 | v2.1.4 | SOCKS5 代理支持（API 走代理/上网直连）；限流优化；连续周期计数修复；Gzip 压缩 JSON 响应；SQLite WAL 模式；MonitorCore 符号缓存 |
 | 2026-05-30 | v2.1.3 | 连续周期筛选标签（1d≥10/4h≥20/1h≥30/15m≥40）AND 多选；极偏信号筛选（连续≥10 + 偏离=极偏 + 极偏≥均偏×2）；偏离/均偏/极偏仅在连续≥10 时显示 |

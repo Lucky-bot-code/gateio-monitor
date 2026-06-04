@@ -966,6 +966,14 @@
                 var rpCls = Math.abs(rp) >= 5 ? 'ind-strong' : '';
                 parts.push('<span class="' + rpDir + ' ' + rpCls + '">' + rpSign + rp.toFixed(1) + '%</span>');
             }
+            // SAR 连续次数
+            if (iv.sar_consecutive >= 1) {
+                var sarUp = iv.sar_trend.indexOf('上涨') !== -1;
+                var sarDir = sarUp ? 'ind-up' : 'ind-down';
+                var sarArrow = sarUp ? '↑' : '↓';
+                var sarCls = iv.sar_consecutive >= 3 ? 'ind-strong' : 'ind-moderate';
+                parts.push('<span class="' + sarDir + ' ' + sarCls + '">SAR:' + sarArrow + iv.sar_consecutive + '</span>');
+            }
             return parts.length > 0 ? parts.join(' ') : '';
         }
 

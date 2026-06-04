@@ -117,6 +117,83 @@ class MonitorCore:
         return ma
 
     @staticmethod
+    def calculate_sar(highs, lows, af_start=0.02, af_step=0.02, af_max=0.20):
+        """计算 Parabolic SAR，返回每个周期的 SAR 值列表"""
+        n = len(highs)
+        sar = [None] * n
+        if n < 2:
+            return sar
+        is_long = True
+        sar_val = lows[0]
+        ep = highs[0]
+        af = af_start
+        sar[0] = sar_val
+        for i in range(1, n):
+            if is_long:
+                sar_val = sar_val + af * (ep - sar_val)
+                if i >= 1:
+                    sar_val = min(sar_val, lows[i - 1])
+                if i >= 2:
+                    sar_val = min(sar_val, lows[i - 2])
+                if lows[i] < sar_val:
+                    is_long = False
+                    sar_val = ep
+                    ep = lows[i]
+                    af = af_start
+                sar[i] = sar_val
+                if is_long and highs[i] > ep:
+                    ep = highs[i]
+                    af = min(af + af_step, af_max)
+            else:
+                sar_val = sar_val - af * (sar_val - ep)
+                if i >= 1:
+                    sar_val = max(sar_val, highs[i - 1])
+                if i >= 2:
+                    sar_val = max(sar_val, highs[i - 2])
+                if highs[i] > sar_val:
+                    is_long = True
+                    sar_val = ep
+                    ep = highs[i]
+                    af = af_start
+                sar[i] = sar_val
+                if not is_long and lows[i] < ep:
+                    ep = lows[i]
+                    af = min(af + af_step, af_max)
+        return sar
+
+    @staticmethod
+    def analyze_sar_trend(sar_values, closes, min_consecutive=3):
+        """分析 SAR 相对价格的连续方向"""
+        n = min(len(sar_values), len(closes))
+        if n < min_consecutive + 1:
+            return "数据不足", 0
+        consecutive_bull = 0
+        consecutive_bear = 0
+        for i in range(n - 1, -1, -1):
+            sv = sar_values[i]
+            cl = closes[i]
+            if sv is None or cl is None:
+                break
+            if sv < cl:
+                if consecutive_bear > 0:
+                    break
+                consecutive_bull += 1
+            elif sv > cl:
+                if consecutive_bull > 0:
+                    break
+                consecutive_bear += 1
+        if consecutive_bull >= min_consecutive:
+            return "连续上涨", consecutive_bull
+        elif consecutive_bear >= min_consecutive:
+            return "连续下跌", consecutive_bear
+        elif consecutive_bull > 0:
+            return "短期上涨", consecutive_bull
+        elif consecutive_bear > 0:
+            return "短期下跌", consecutive_bear
+        else:
+            return "震荡", 0
+
+    @staticmethod
     def analyze_trend(
         ma_values: List[Optional[float]], min_consecutive: int = 3
     ) -> Tuple[str, int, List[float]]:
@@ -183,6 +260,12 @@ class MonitorCore:
                 if start_close != 0:
                     reversal_pct = (closes[-1] - start_close) / start_close * 100
 
+        # SAR 计算
+        highs = [float(k["h"]) for k in klines_sorted]
+        lows = [float(k["l"]) for k in klines_sorted]
+        sar_values = MonitorCore.calculate_sar(highs, lows)
+        sar_trend, sar_consecutive = MonitorCore.analyze_sar_trend(sar_values, closes)
+
         return {
             "name": interval_name,
             "interval": interval,
@@ -197,6 +280,8 @@ class MonitorCore:
             "prev_volume": round(prev_volume, 2),
             "prev_high": round(prev_high, 4),
             "prev_low": round(prev_low, 4) if prev_low != float("inf") else float("inf"),
+            "sar_trend": sar_trend,
+            "sar_consecutive": sar_consecutive,
         }
 
     def _fetch_symbol_data(self, sym_info: Dict) -> Dict:
