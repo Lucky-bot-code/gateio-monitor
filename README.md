@@ -1,11 +1,11 @@
-# Gate.io MA10 趋势监控系统 v3.0
+# Gate.io MA10 趋势监控系统 v3.1
 
 基于 **Gate.io U本位永续合约 API** 的 MA10（10周期移动平均线）趋势监控系统。支持 **Web 可视化面板** 和 **命令行脚本**，实时监控加密货币与美股代币的多周期趋势。
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-2.0%2B-green)](https://flask.palletsprojects.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-v3.0-brightgreen)](.)
+[![Version](https://img.shields.io/badge/Version-v3.1-brightgreen)](.)
 
 ---
 
@@ -15,12 +15,13 @@
 - **四周期趋势**：日K、4小时、60分钟、15分钟 MA10 趋势方向 + sparkline 走势小图
 - **成交额前100标的**：自动按 Gate.io 24h 成交额排名取前 100 个 USDT 合约
 - **技术指标**：连续周期总涨跌幅（卡片展示）；MA10 + SAR（K线图叠加），趋势跟踪双重确认；SAR 方向连续周期计数（卡片指标行展示）
-- **转折预警 v3.0**：SAR↔MA10 双向验证框架，两条触发路径 + MA10 三类型条件 + 中途提前确认机制
+- **转折预警 v3.1**：SAR↔MA10 双向验证框架，两条触发路径 + MA10 三类型条件 + 中途提前确认机制 + 企业微信订阅推送
 - **K线图表**：点击卡片弹出交互式 K线图（TradingView lightweight-charts），支持周期切换 + MA10/SAR 指标叠加
 
 ### 预警与通知
-- **转折预警**：SAR↔MA10 双向验证，四周期独立检测。类型1(MA10拐头2周期+开盘价确认)、类型2(MA10刚拐头+量能爆发)、类型3(MA10刚拐头+量递增)
+- **转折预警**：SAR↔MA10 双向验证，四周期独立检测。类型1(MA10拐头2周期+开盘价确认)、类型2(MA10刚拐头+量能爆发)、类型3(MA10刚拐头+量递增)。点击周期格子弹出菜单订阅企业微信推送
 - **中途确认**：类型1 在 1.5 个周期处提前调度单标数据获取，无需等待满2个周期
+- **极偏信号 v4**：MA10 连续≥5 + SAR 连续≥5 同向时，四条件检测极端偏离（当前偏≈极偏 + 当前偏≥均偏×K + 当前涨跌≈最大涨跌 + 当前涨跌≥均涨跌×J）。分周期阈值（日K K=2.5/4h K=3.0/1h K=4.0）。自动推送企业微信
 - **价格提醒**：每标的可设置突破/跌破价格阈值，触发后高亮脉冲闪烁
 
 ### 交互与体验
@@ -31,7 +32,7 @@
 - **持仓管理**：多/空/无三态标记，服务器端持久化，持仓标的最大置顶
 - **标的管理**：输入简称（如 `btc`）自动推导完整合约名，实时验证 Gate.io 合约是否存在，无需修改 JSON 文件
 - **搜索 + 排序**：实时搜索过滤，按持仓/成交额/涨跌幅多维度排序
-- **连续周期筛选**：四周期独立阈值标签（1d≥10 / 4h≥20 / 1h≥30 / 15m≥40），多选 AND 逻辑
+- **企业微信订阅推送**：点击周期格子 → 弹出菜单 → 选择「企业微信预警」，该标的+周期触发转折信号时自动推送
 - **移动端适配**：底部导航栏，响应式网格布局，手机/电脑均可使用
 
 ### 性能与架构
@@ -83,7 +84,10 @@ python gateio_futures_monitor.py
 ├── gateio_available_symbols.json   # 当前监控标的列表 (100 个)
 ├── gateio_futures_monitor.py       # 命令行版监控脚本
 ├── gateio_futures_scan.py          # Gate.io 合约扫描器
+├── backtest_extreme.py              # 极偏信号回测脚本
 ├── tp_state.json                   # [运行时] 转折预警状态
+├── wecom_subscriptions.json         # [运行时] 企业微信订阅
+├── extreme_sent.json                # [运行时] 极偏推送去重
 ├── klines.db                       # [运行时] SQLite K线缓存
 ├── positions.json                  # [运行时] 持仓标记
 ├── price_alerts.json               # [运行时] 价格提醒
@@ -169,6 +173,8 @@ MA10 转折三类型（多头为例，空头对称相反）：
 | `/api/klines` | GET | K线数据（?symbol=&interval=&limit=） |
 | `/api/symbols` | GET/POST/DELETE | 标的管理 |
 | `/api/price-alerts` | GET/POST/DELETE | 价格提醒管理 |
+| `/api/wecom-subscriptions` | GET | 获取企业微信订阅列表 |
+| `/api/wecom-subscription` | POST | 切换企业微信订阅（body: {symbol, interval}） |
 
 ---
 
@@ -198,6 +204,7 @@ PROXY_URL = None
 
 | 日期 | 版本 | 内容 |
 |------|------|------|
+| 2026-06-05 | **v3.1** | 企业微信订阅推送（点击周期格子弹出菜单选择订阅，仅订阅标的+周期触发转折信号时推送）；极偏信号 v4 分周期阈值（日K K/J=2.5, 4h=3.0, 1h=4.0，15m 排除），MA10+S连续≥5 同向 + 四条件全满足触发，自动推送企业微信；极偏信号回测脚本 backtest_extreme.py；推送去重持久化 extreme_sent.json；前端清理旧筛选标签 |
 | 2026-06-05 | **v3.0** | 转折预警 v3：SAR↔MA10 双向验证框架替换旧周期背离；两条触发路径(SA先/MA10先) + MA10 三类型条件；类型1 中途提前确认机制（1.5周期调度单标获取）；移除 /api/divergence 端点，新增 /api/turning-points；前端转折预警独立标签页；四周期独立运行互不干扰 |
 | 2026-06-04 | **v2.2.1** | SAR 方向连续周期计数：卡片每个周期格子展示 SAR↑N（上涨）/ SAR↓N（下跌），≥3 加粗高亮；与 MA10 连续周期并排展示，双重验证趋势强度 |
 | 2026-06-04 | **v2.2.0** | 去除布林带（卡片/服务端/K线图全部移除）；偏离/均偏/极偏替换为连续周期总涨跌幅（不限周期数）；K线图引入 SAR 抛物线转向指标（AF 0.02/0.02/0.20），剔除 MACD；移除转折预警 + 持仓预警 + 企微推送；alerts.py 精简为仅背离检测；state.py 移除 MA10 状态持久化 |

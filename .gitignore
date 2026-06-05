@@ -9,6 +9,9 @@ __pycache__/
 positions.json
 price_alerts.json
 klines.db
+tp_state.json
+wecom_subscriptions.json
+extreme_sent.json
 
 # Backup folders
 *_backup_*/

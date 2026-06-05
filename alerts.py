@@ -232,3 +232,110 @@ def analyze_turning_points(data: List[Dict], tp_state: Dict) -> Tuple[List[Dict]
                             })
 
     return alerts, new_state, pending
+
+
+# ============ 极偏信号检测 v4 ============
+
+# 排除的周期
+_EXTREME_EXCLUDE_INTERVALS = {"15m"}
+# 前置条件阈值
+_EXTREME_MIN_CONSECUTIVE = 5
+# 分周期倍数阈值: {interval: (K, J)}
+_EXTREME_THRESHOLDS = {
+    "1d": (2.5, 2.5),
+    "4h": (3.0, 3.0),
+    "1h": (4.0, 4.0),
+}
+# 浮点容差
+_EXTREME_TOLERANCE = 0.01
+
+
+def analyze_extreme_signals(data: List[Dict]) -> List[Dict]:
+    """检测极偏信号（极多/极空）。
+
+    前置条件：MA10连续>=5 且 SAR连续>=5 且同方向
+    分周期 K/J 阈值：
+      日K: K=2.5, J=2.5  4h: K=3.0, J=3.0  1h: K=4.0, J=4.0
+    四条件全满足触发：
+    ① 当前偏离 ≈ 极偏 (差 < 0.01%)
+    ② 当前偏离 >= 均偏 × K
+    ③ 当前涨跌幅 ≈ 最大涨跌幅 (差 < 0.01%)
+    ④ 当前涨跌幅 >= 平均涨跌幅 × J
+
+    Returns: list of extreme signal dicts
+    """
+    signals = []
+
+    for item in data:
+        symbol = item["symbol"]
+        for iv in item.get("intervals", []):
+            interval = iv.get("interval", "")
+            if interval in _EXTREME_EXCLUDE_INTERVALS:
+                continue
+
+            K, J = _EXTREME_THRESHOLDS.get(interval, (3.0, 3.0))
+
+            consecutive = iv.get("consecutive", 0)
+            sar_consecutive = iv.get("sar_consecutive", 0)
+            sar_direction = iv.get("sar_direction", "neutral")
+
+            # 前置条件
+            if consecutive < _EXTREME_MIN_CONSECUTIVE:
+                continue
+            if sar_consecutive < _EXTREME_MIN_CONSECUTIVE:
+                continue
+
+            # 方向一致性：MA10 和 SAR 必须同向
+            trend = iv.get("trend", "")
+            ma10_dir = None
+            if "上涨" in trend:
+                ma10_dir = "bullish"
+            elif "下跌" in trend:
+                ma10_dir = "bearish"
+            if ma10_dir is None or sar_direction != ma10_dir:
+                continue
+
+            ext_dev_cur = iv.get("ext_dev_cur")
+            ext_dev_avg = iv.get("ext_dev_avg")
+            ext_dev_max = iv.get("ext_dev_max")
+            ext_chg_cur = iv.get("ext_chg_cur")
+            ext_chg_avg = iv.get("ext_chg_avg")
+            ext_chg_max = iv.get("ext_chg_max")
+
+            if any(v is None for v in [ext_dev_cur, ext_dev_avg, ext_dev_max,
+                                        ext_chg_cur, ext_chg_avg, ext_chg_max]):
+                continue
+
+            # 条件①: 当前偏离 ≈ 极偏
+            if abs(ext_dev_cur - ext_dev_max) >= _EXTREME_TOLERANCE:
+                continue
+            # 条件②: 当前偏离 >= 均偏 × K
+            if ext_dev_cur < ext_dev_avg * K:
+                continue
+            # 条件③: 当前涨跌幅 ≈ 最大涨跌幅
+            if abs(ext_chg_cur - ext_chg_max) >= _EXTREME_TOLERANCE:
+                continue
+            # 条件④: 当前涨跌幅 >= 平均涨跌幅 × J
+            if ext_chg_cur < ext_chg_avg * J:
+                continue
+
+            label = "极多" if ma10_dir == "bullish" else "极空"
+            signals.append({
+                "symbol": symbol,
+                "interval_name": iv["name"],
+                "interval": interval,
+                "label": label,
+                "direction": ma10_dir,
+                "dev_cur": ext_dev_cur,
+                "dev_avg": ext_dev_avg,
+                "dev_max": ext_dev_max,
+                "chg_cur": ext_chg_cur,
+                "chg_avg": ext_chg_avg,
+                "chg_max": ext_chg_max,
+                "consecutive": consecutive,
+                "sar_consecutive": sar_consecutive,
+                "close": iv.get("close"),
+                "ma10": iv.get("ma10"),
+            })
+
+    return signals

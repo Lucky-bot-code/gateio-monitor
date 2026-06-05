@@ -20,6 +20,7 @@ CACHE_FRESHNESS = {
 POSITIONS_FILE = "positions.json"
 PRICE_ALERTS_FILE = "price_alerts.json"
 TP_STATE_FILE = "tp_state.json"
+WECOM_SUBS_FILE = "wecom_subscriptions.json"
 DB_PATH = "klines.db"
 
 
@@ -84,6 +85,25 @@ def load_tp_state() -> Dict:
 
 def save_tp_state(state: Dict):
     _atomic_write(TP_STATE_FILE, state)
+
+
+# ========== 企业微信预警订阅持久化 ==========
+
+def load_wecom_subscriptions() -> Dict:
+    """加载企业微信预警订阅。
+    格式: {symbol: [interval, ...]}  例如 {"BTCUSDT": ["1d", "4h"]}
+    """
+    if os.path.exists(WECOM_SUBS_FILE):
+        try:
+            with open(WECOM_SUBS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_wecom_subscriptions(subs: Dict):
+    _atomic_write(WECOM_SUBS_FILE, subs)
 
 
 # ========== SQLite K线缓存 ==========

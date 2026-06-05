@@ -102,16 +102,6 @@
         }
         .sort-select:focus { border-color: var(--accent); }
         .search-count { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; }
-        .filter-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-        .filter-chip {
-            background: var(--bg-secondary); border: 1px solid var(--border);
-            border-radius: 6px; padding: 5px 10px;
-            font-size: 0.7rem; color: var(--text-secondary);
-            cursor: pointer; user-select: none; white-space: nowrap;
-            transition: all 0.15s;
-        }
-        .filter-chip:hover { border-color: var(--accent); color: var(--text-primary); }
-        .filter-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
         .stats-bar {
             display: flex; gap: 14px; padding: 10px 20px;
             background: var(--bg-secondary); border-bottom: 1px solid var(--border);
@@ -185,6 +175,7 @@
         .interval-item {
             border-radius: 8px; padding: 8px 6px; text-align: center;
             border: 1px solid transparent; overflow: hidden;
+            position: relative; cursor: pointer;
         }
         .interval-item .name { font-size: 0.65rem; color: var(--text-secondary); margin-bottom: 2px; }
         .interval-item .trend { font-size: 0.75rem; font-weight: 600; margin-bottom: 1px; }
@@ -444,6 +435,29 @@
         .card-price-tag.below { background: rgba(239,68,68,0.15); color: var(--down); }
         .card-price-tag.triggered { opacity: 0.6; text-decoration: line-through; }
 
+        /* Interval popup menu */
+        .interval-popup {
+            position: fixed; z-index: 200;
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 10px; padding: 6px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4); min-width: 160px;
+        }
+        .interval-popup-option {
+            display: block; width: 100%; background: transparent; border: none;
+            color: var(--text-primary); font-size: 0.78rem; padding: 8px 12px;
+            border-radius: 6px; cursor: pointer; text-align: left;
+            white-space: nowrap;
+        }
+        .interval-popup-option:hover { background: var(--bg-card); }
+        .interval-popup-option.subscribed { color: #f59e0b; }
+        .interval-wecom-badge {
+            position: absolute; top: 2px; right: 2px;
+            width: 14px; height: 14px; border-radius: 50%;
+            background: #f59e0b; color: #0f172a;
+            font-size: 0.55rem; display: flex; align-items: center; justify-content: center;
+            line-height: 1; font-weight: 700;
+        }
+
         /* Symbol manager */
         .manage-section { max-width: 600px; }
         .manage-section h3 { font-size: 0.9rem; margin-bottom: 8px; color: var(--text-primary); }
@@ -505,13 +519,6 @@
                 <option value="change_desc">涨跌幅: 高→低</option>
                 <option value="change_asc">涨跌幅: 低→高</option>
             </select>
-            <div class="filter-chips" id="filterChips">
-                <span class="filter-chip" data-key="15m" data-threshold="40" onclick="toggleChip(this)" title="15分钟连续≥40">15m≥40</span>
-                <span class="filter-chip" data-key="1h" data-threshold="30" onclick="toggleChip(this)" title="60分钟连续≥30">1h≥30</span>
-                <span class="filter-chip" data-key="4h" data-threshold="20" onclick="toggleChip(this)" title="4小时连续≥20">4h≥20</span>
-                <span class="filter-chip" data-key="1d" data-threshold="10" onclick="toggleChip(this)" title="日K连续≥10">1d≥10</span>
-                <span class="filter-chip" data-key="extreme" data-threshold="0" onclick="toggleChip(this)" title="连续≥10 + 偏离=极偏 + 极偏≥均偏×2">极偏信号</span>
-            </div>
             <span class="search-count" id="searchCount"></span>
         </div>
         <div id="grid" class="grid" style="display:none"></div>
@@ -696,36 +703,14 @@
             }
         });
 
-        // ====== Filter / Sort ======
-        function getActiveChips() {
-            var chips = document.querySelectorAll('.filter-chip.active');
-            var active = [];
-            chips.forEach(function(c) { active.push({ key: c.dataset.key, threshold: parseInt(c.dataset.threshold) }); });
-            return active;
-        }
-
-        function toggleChip(chip) {
-            chip.classList.toggle('active');
-            applyFilter();
-        }
-
+        // ====== Filter ======
         function applyFilter() {
             var query = currentSearchQuery;
-            var activeChips = getActiveChips();
             var cards = document.querySelectorAll('#grid .card');
             var visibleCount = 0;
             cards.forEach(function(card) {
                 var symbol = card.id.replace('card-', '').toLowerCase();
-                var nameMatch = !query || symbol.indexOf(query) !== -1;
-                var consMatch = true;
-                if (activeChips.length > 0) {
-                    consMatch = activeChips.every(function(chip) {
-                        if (chip.key === 'extreme') return card.getAttribute('data-extreme') === '1';
-                        var val = parseInt(card.getAttribute('data-c' + chip.key)) || 0;
-                        return val >= chip.threshold;
-                    });
-                }
-                var match = nameMatch && consMatch;
+                var match = !query || symbol.indexOf(query) !== -1;
                 card.style.display = match ? '' : 'none';
                 if (match) visibleCount++;
             });
@@ -1015,7 +1000,10 @@
                     var detail = iv.candles_count < 20 ? 'K线不足(' + iv.candles_count + ')' : '';
                     var ci = iv.consecutive > 0 ? '(' + iv.consecutive + '周期)' : '';
                     var indHtml = formatIndicators(iv);
-                    intervalsHtml += '<div class="interval-item ' + tc + '" onclick="event.stopPropagation();openChartModal(\'' + item.symbol + '\', \'' + iv.interval + '\')" title="点击查看K线图">'
+                    var isWecomSub = wecomSubs[item.symbol] && wecomSubs[item.symbol].indexOf(iv.interval) !== -1;
+                    var wecomBadgeHtml = isWecomSub ? '<span class="interval-wecom-badge" title="企业微信预警已订阅">W</span>' : '';
+                    intervalsHtml += '<div class="interval-item ' + tc + '" onclick="event.stopPropagation();showIntervalPopup(\'' + item.symbol + '\', \'' + iv.interval + '\', event)" title="点击查看选项">'
+                        + wecomBadgeHtml
                         + '<div class="name">' + iv.name + '</div>'
                         + '<div class="trend">' + iv.trend + ci + '</div>'
                         + '<div class="detail">' + detail + '</div>'
@@ -1057,12 +1045,7 @@
                     tpBadgeHtml = '<span class="card-div-badge ' + bCls + '" onclick="event.stopPropagation();switchTab(\'turning\')" title="转折: ' + bTitle + '">' + bLabel + bCount + '</span>';
                 }
 
-                var consData = '';
-                item.intervals.forEach(function(iv) {
-                    var ikey = iv.interval === '1d' ? '1d' : (iv.interval === '4h' ? '4h' : (iv.interval === '1h' ? '1h' : '15m'));
-                    consData += ' data-c' + ikey + '="' + (iv.consecutive || 0) + '"';
-                });
-                html += '<div class="' + cardClass + '" id="card-' + item.symbol + '"' + consData + ' onclick="openChartModal(\'' + item.symbol + '\', \'1d\')">'
+                html += '<div class="' + cardClass + '" id="card-' + item.symbol + '" onclick="openChartModal(\'' + item.symbol + '\', \'1d\')">'
                     + '<span class="card-chart-icon" onclick="event.stopPropagation();openChartModal(\'' + item.symbol + '\', \'1d\')" title="打开K线图">📈</span>'
                     + '<div class="card-header">'
                     + '<div class="card-title"><span class="card-pos ' + posClass + '" onclick="showPositionDropdown(\'' + item.symbol + '\', event)" data-symbol="' + item.symbol + '" title="点击设置持仓">' + (posLabel || '＋') + '</span>'
@@ -1383,6 +1366,77 @@
         // ====== Price Alerts ======
         let priceAlertsCache = {};
 
+        // ====== WeChat Work Alert Subscriptions ======
+        let wecomSubs = {};
+
+        function loadWecomSubs() {
+            fetch('/api/wecom-subscriptions')
+                .then(function(r) { return r.json(); })
+                .then(function(data) { wecomSubs = data || {}; })
+                .catch(function() { wecomSubs = {}; });
+        }
+
+        function showIntervalPopup(symbol, interval, event) {
+            event.stopPropagation();
+            closeIntervalPopup();
+            var trigger = event.currentTarget;
+            var rect = trigger.getBoundingClientRect();
+            var isSubscribed = wecomSubs[symbol] && wecomSubs[symbol].indexOf(interval) !== -1;
+            var popup = document.createElement('div');
+            popup.className = 'interval-popup'; popup.id = 'intervalPopup';
+
+            var chartOpt = document.createElement('button');
+            chartOpt.className = 'interval-popup-option';
+            chartOpt.textContent = '\u{1F4C8} 查看K线图';
+            chartOpt.onclick = function(e2) {
+                e2.stopPropagation();
+                closeIntervalPopup();
+                openChartModal(symbol, interval);
+            };
+            popup.appendChild(chartOpt);
+
+            var wecomOpt = document.createElement('button');
+            wecomOpt.className = 'interval-popup-option' + (isSubscribed ? ' subscribed' : '');
+            wecomOpt.textContent = (isSubscribed ? '\u{1F514} ' : '\u{1F515} ') + '企业微信预警';
+            wecomOpt.onclick = function(e2) {
+                e2.stopPropagation();
+                closeIntervalPopup();
+                toggleWecomSub(symbol, interval);
+            };
+            popup.appendChild(wecomOpt);
+
+            var left = Math.max(4, rect.left);
+            if (left + 170 > window.innerWidth - 4) left = window.innerWidth - 174;
+            var top = rect.bottom + 4;
+            if (top + 90 > window.innerHeight - 4) top = rect.top - 90;
+            popup.style.top = top + 'px';
+            popup.style.left = left + 'px';
+            document.body.appendChild(popup);
+            setTimeout(function() { document.addEventListener('click', closeIntervalPopup); }, 0);
+        }
+
+        function closeIntervalPopup(e) {
+            var popup = document.getElementById('intervalPopup');
+            if (!popup) return;
+            if (e && popup.contains(e.target)) return;
+            popup.remove();
+            document.removeEventListener('click', closeIntervalPopup);
+        }
+
+        function toggleWecomSub(symbol, interval) {
+            fetch('/api/wecom-subscription', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({symbol: symbol, interval: interval})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                wecomSubs = data.subscriptions || {};
+                if (dataCache) renderCards(dataCache);
+            })
+            .catch(function(e) { console.error('订阅切换失败', e); });
+        }
+
         function loadPriceAlertsFromServer() {
             return fetch('/api/price-alerts')
                 .then(function(r) { return r.json(); })
@@ -1550,6 +1604,7 @@
         loadPositionsFromServer().then(function() {
             return loadPriceAlertsFromServer();
         }).then(function() {
+            loadWecomSubs();
             loadData();
             startCountdown();
             connectSSE();

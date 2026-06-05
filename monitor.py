@@ -291,6 +291,35 @@ class MonitorCore:
         volumes_10 = [float(k["v"]) for k in klines_sorted[-10:]]
         avg_volume_10 = round(sum(volumes_10) / len(volumes_10), 2) if volumes_10 else None
 
+        # --- 极偏信号指标计算 (consecutive >= 5) ---
+        ext_dev_avg = None
+        ext_dev_max = None
+        ext_dev_cur = None
+        ext_chg_avg = None
+        ext_chg_max = None
+        ext_chg_cur = None
+        if consecutive >= 5 and len(closes) > consecutive and len(ma10) > consecutive:
+            n = consecutive
+            devs = []
+            chgs = []
+            for i in range(-n, 0):
+                c = closes[i]
+                m = ma10[i]
+                if m is not None and m != 0:
+                    devs.append(abs((c - m) / m * 100))
+                if i > -len(closes):
+                    prev_c = closes[i - 1]
+                    if prev_c != 0:
+                        chgs.append(abs((c - prev_c) / prev_c * 100))
+            if devs:
+                ext_dev_cur = round(devs[-1], 4)
+                ext_dev_avg = round(sum(devs) / len(devs), 4)
+                ext_dev_max = round(max(devs), 4)
+            if chgs:
+                ext_chg_cur = round(chgs[-1], 4)
+                ext_chg_avg = round(sum(chgs) / len(chgs), 4)
+                ext_chg_max = round(max(chgs), 4)
+
         return {
             "name": interval_name,
             "interval": interval,
@@ -313,6 +342,13 @@ class MonitorCore:
             "sar_consecutive": sar_consecutive,
             "sar_flip": sar_flip,
             "sar_direction": sar_direction,
+            # 极偏信号指标
+            "ext_dev_avg": ext_dev_avg,
+            "ext_dev_max": ext_dev_max,
+            "ext_dev_cur": ext_dev_cur,
+            "ext_chg_avg": ext_chg_avg,
+            "ext_chg_max": ext_chg_max,
+            "ext_chg_cur": ext_chg_cur,
         }
 
     def _fetch_symbol_data(self, sym_info: Dict) -> Dict:

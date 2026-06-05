@@ -21,17 +21,21 @@ import requests
 from flask import Flask, jsonify, render_template, request, Response
 
 from monitor import MonitorCore, get_session, BASE_URL, CONFIG_FILE, _api_sem
-from alerts import analyze_turning_points
+from alerts import analyze_turning_points, analyze_extreme_signals
 from state import (
     load_positions, save_positions,
     load_price_alerts, save_price_alerts,
     init_db, get_cached_klines, store_klines,
     load_tp_state, save_tp_state,
+    load_wecom_subscriptions, save_wecom_subscriptions,
 )
 
 # ============ 配置 ============
 PORT = 5000
 AUTO_REFRESH_INTERVAL = 300
+
+# 企业微信机器人 Webhook
+WECOM_WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=7bef2a11-7838-4859-a9c0-b65b6cf2dc36"
 
 app = Flask(__name__)
 
@@ -76,9 +80,75 @@ def set_next_refresh_at(val: float):
     with _next_refresh_lock:
         _next_refresh_at = val
 
+# 极偏信号去重状态: {(symbol, interval, label): True}
+_extreme_sent: dict = {}
+EXTREME_SENT_FILE = "extreme_sent.json"
+
+def _load_extreme_sent():
+    global _extreme_sent
+    try:
+        with open(EXTREME_SENT_FILE, "r", encoding="utf-8") as f:
+            _extreme_sent = json.load(f)
+    except Exception:
+        _extreme_sent = {}
+
+def _save_extreme_sent():
+    try:
+        with open(EXTREME_SENT_FILE, "w", encoding="utf-8") as f:
+            json.dump(_extreme_sent, f, ensure_ascii=False)
+    except Exception:
+        pass
+
 _browser_opened = False
+_load_extreme_sent()
 user_positions = load_positions()
 user_price_alerts = load_price_alerts()
+wecom_subscriptions = load_wecom_subscriptions()
+
+
+def send_wecom_turning_alert(alert: dict) -> bool:
+    """发送单条转折预警到企业微信。"""
+    if not WECOM_WEBHOOK_URL:
+        return False
+    signal = alert.get("signal", "")
+    emoji = "📈" if "买入" in signal else "📉"
+    path = alert.get("path", "")
+    ma10_type = alert.get("ma10_type", "")
+    type_str = f"类型{ma10_type}" if ma10_type else ""
+    path_str = f"{path} {type_str}" if path else ""
+    content = f"""**🔔 转折预警订阅推送**
+> {emoji} **{alert['symbol']}** · {alert['interval_name']} · **{signal}**
+> 路径: {path_str}
+> 价格: {alert.get('close', '-')} / MA10: {alert.get('ma10', '-')}
+> 时间: {alert.get('timestamp', '')}"""
+    payload = {"msgtype": "markdown", "markdown": {"content": content}}
+    try:
+        resp = requests.post(WECOM_WEBHOOK_URL, json=payload, timeout=15)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+
+def send_wecom_extreme_alert(s: dict) -> bool:
+    """发送极偏信号到企业微信（全量推送，无需订阅）。"""
+    if not WECOM_WEBHOOK_URL:
+        return False
+    label = s["label"]
+    emoji = "🟢" if label == "极多" else "🔴"
+    content = f"""**⚡ 极偏信号 · {label}**
+> {emoji} **{s['symbol']}** · {s['interval_name']}
+> 偏离: {s['dev_cur']:.2f}% (均偏 {s['dev_avg']:.2f}% / 极偏 {s['dev_max']:.2f}%)
+> 涨跌幅: {s['chg_cur']:.2f}% (平均 {s['chg_avg']:.2f}% / 最大 {s['chg_max']:.2f}%)
+> MA10 连续: {s['consecutive']}周期 / SAR 连续: {s['sar_consecutive']}周期
+> 价格: {s.get('close', '-')} / MA10: {s.get('ma10', '-')}
+> 条件: 偏离=极偏 + 偏离>=均偏×3 + 涨跌幅=最大 + 涨跌幅>=平均×3"""
+    payload = {"msgtype": "markdown", "markdown": {"content": content}}
+    try:
+        resp = requests.post(WECOM_WEBHOOK_URL, json=payload, timeout=15)
+        return resp.status_code == 200
+    except Exception:
+        return False
 
 # SSE 管理器
 class SSEManager:
@@ -180,6 +250,41 @@ def refresh_data():
         for a in alerts:
             a["timestamp"] = now_str
         cache["turning_points"] = alerts
+
+        # 企业微信订阅推送
+        if alerts and wecom_subscriptions:
+            pushed = 0
+            for a in alerts:
+                sym = a["symbol"]
+                iv = a["interval"]
+                if sym in wecom_subscriptions and iv in wecom_subscriptions[sym]:
+                    if send_wecom_turning_alert(a):
+                        pushed += 1
+                        print(f"  [企业微信推送] {sym} {a['interval_name']} {a['signal']}")
+            if pushed:
+                print(f"  [企业微信推送] 已推送 {pushed} 条预警")
+
+        # 极偏信号检测（全量推送，无需订阅）
+        extreme_signals = analyze_extreme_signals(data)
+        if extreme_signals:
+            global _extreme_sent
+            pushed_ext = 0
+            for s in extreme_signals:
+                key = (s["symbol"], s["interval"], s["label"])
+                if key not in _extreme_sent:
+                    if send_wecom_extreme_alert(s):
+                        _extreme_sent[key] = True
+                        pushed_ext += 1
+                        print(f"  [极偏推送] {s['symbol']} {s['interval_name']} {s['label']} "
+                              f"偏离:{s['dev_cur']:.2f}% 涨跌:{s['chg_cur']:.2f}%")
+            if pushed_ext:
+                _save_extreme_sent()
+                print(f"  [极偏推送] 已推送 {pushed_ext} 条极偏信号")
+            # 定期裁剪去重缓存（保留最近 300 条）
+            if len(_extreme_sent) > 500:
+                _extreme_sent = dict(list(_extreme_sent.items())[-300:])
+                _save_extreme_sent()
+
         cache["last_update"] = now_str
         # 调度中途检查
         for p in pending:
@@ -668,6 +773,38 @@ def api_price_alerts_delete():
     save_price_alerts(user_price_alerts)
     cache["price_alerts"] = user_price_alerts
     return jsonify({"status": "ok", "alerts": user_price_alerts})
+
+
+# ============ 企业微信预警订阅 API ============
+
+@app.route("/api/wecom-subscriptions", methods=["GET"])
+def api_wecom_subs_list():
+    return jsonify(wecom_subscriptions)
+
+
+@app.route("/api/wecom-subscription", methods=["POST"])
+def api_wecom_sub_toggle():
+    """切换某个 symbol+interval 的订阅状态。body: {symbol, interval}"""
+    global wecom_subscriptions
+    data = request.get_json() or {}
+    symbol = (data.get("symbol") or "").strip().upper()
+    interval = (data.get("interval") or "").strip()
+    if not symbol or not interval:
+        return jsonify({"error": "symbol and interval required"}), 400
+    if symbol not in wecom_subscriptions:
+        wecom_subscriptions[symbol] = []
+    if interval in wecom_subscriptions[symbol]:
+        # 取消订阅
+        wecom_subscriptions[symbol].remove(interval)
+        if not wecom_subscriptions[symbol]:
+            del wecom_subscriptions[symbol]
+        save_wecom_subscriptions(wecom_subscriptions)
+        return jsonify({"status": "ok", "subscribed": False, "subscriptions": wecom_subscriptions})
+    else:
+        # 订阅
+        wecom_subscriptions[symbol].append(interval)
+        save_wecom_subscriptions(wecom_subscriptions)
+        return jsonify({"status": "ok", "subscribed": True, "subscriptions": wecom_subscriptions})
 
 
 # ============ 启动工具 ============
