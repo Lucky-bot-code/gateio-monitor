@@ -235,32 +235,34 @@
         .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
         .view { display: none; }
         .view.active { display: block; }
-        .divergence-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; padding: 14px 20px; max-width: 1400px; margin: 0 auto; }
-        @media (max-width: 480px) { .divergence-grid { grid-template-columns: 1fr; } }
-        .divergence-card {
+        .tp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; padding: 14px 20px; max-width: 1400px; margin: 0 auto; }
+        @media (max-width: 480px) { .tp-grid { grid-template-columns: 1fr; } }
+        .tp-card {
             background: var(--bg-secondary); border: 1px solid var(--border);
             border-radius: 12px; padding: 14px;
             transition: transform 0.2s, box-shadow 0.2s;
         }
-        .divergence-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
-        .divergence-card.buy { border-color: var(--up); box-shadow: 0 0 0 1px var(--up), 0 8px 24px rgba(16,185,129,0.12); }
-        .divergence-card.sell { border-color: var(--down); box-shadow: 0 0 0 1px var(--down), 0 8px 24px rgba(239,68,68,0.12); }
-        .divergence-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-        .divergence-symbol { font-size: 1.05rem; font-weight: 600; }
-        .divergence-signal {
+        .tp-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+        .tp-card.buy { border-color: var(--up); box-shadow: 0 0 0 1px var(--up), 0 8px 24px rgba(16,185,129,0.12); }
+        .tp-card.sell { border-color: var(--down); box-shadow: 0 0 0 1px var(--down), 0 8px 24px rgba(239,68,68,0.12); }
+        .tp-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .tp-symbol { font-size: 1.05rem; font-weight: 600; }
+        .tp-interval { font-size: 0.72rem; color: var(--accent); font-weight: 600; }
+        .tp-signal {
             padding: 3px 10px; border-radius: 5px; font-size: 0.75rem; font-weight: 700;
         }
-        .divergence-signal.buy { background: var(--up-bg); color: var(--up); border: 1px solid var(--up); }
-        .divergence-signal.sell { background: var(--down-bg); color: var(--down); border: 1px solid var(--down); }
-        .divergence-detail { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6; }
-        .divergence-detail .hl { color: var(--text-primary); font-weight: 600; }
-        .divergence-empty { text-align: center; color: var(--text-secondary); padding: 60px 20px; }
-        .divergence-desc {
+        .tp-signal.buy { background: var(--up-bg); color: var(--up); border: 1px solid var(--up); }
+        .tp-signal.sell { background: var(--down-bg); color: var(--down); border: 1px solid var(--down); }
+        .tp-detail { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6; }
+        .tp-detail .hl { color: var(--text-primary); font-weight: 600; }
+        .tp-empty { text-align: center; color: var(--text-secondary); padding: 60px 20px; }
+        .tp-desc {
             padding: 10px 20px; background: var(--bg-secondary);
             border-bottom: 1px solid var(--border);
             font-size: 0.75rem; color: var(--text-secondary);
             max-width: 1400px; margin: 0 auto;
         }
+        .tp-path { font-size: 0.7rem; padding: 2px 8px; border-radius: 8px; background: var(--bg); display: inline-block; }
         .tab-badge {
             display: inline-flex; align-items: center; justify-content: center;
             min-width: 18px; height: 18px; padding: 0 5px;
@@ -452,7 +454,7 @@
     <div class="header">
         <div>
             <h1>Gate.io U本位合约 MA10 监控</h1>
-            <div class="subtitle">Gate.io U本位永续合约市场 v2.0</div>
+            <div class="subtitle">Gate.io U本位永续合约市场 v3.0</div>
         </div>
         <div class="header-right">
             <button class="theme-toggle" onclick="toggleTheme()" title="切换亮色/暗色主题">🌓</button>
@@ -464,7 +466,7 @@
 
     <div class="tabs">
         <button class="tab active" id="tab-monitor" onclick="switchTab('monitor')">监控面板</button>
-        <button class="tab" id="tab-divergence" onclick="switchTab('divergence')">周期背离<span id="divergenceBadge" class="tab-badge" style="display:none"></span></button>
+        <button class="tab" id="tab-turning" onclick="switchTab('turning')">转折预警<span id="turningBadge" class="tab-badge" style="display:none"></span></button>
         <button class="tab" id="tab-manage" onclick="switchTab('manage')">管理</button>
     </div>
 
@@ -516,18 +518,18 @@
     </div>
     </div>
 
-    <div id="view-divergence" class="view">
-    <div class="divergence-desc">
-        大周期（日K/4h/1h）连续 ≥5 个周期同向，且相邻小周期方向相反时产生信号。
+    <div id="view-turning" class="view">
+    <div class="tp-desc">
+        SAR↔MA10 双向验证转折预警：SAR翻转 + MA10转折确认同时满足时触发。
     </div>
-    <div id="divergenceLoading" class="loading">
-        <div class="spinner"></div><div>正在分析周期背离...</div>
+    <div id="turningLoading" class="loading">
+        <div class="spinner"></div><div>正在分析转折信号...</div>
     </div>
-    <div id="divergenceEmpty" class="divergence-empty" style="display:none">
-        <div style="font-size:1.1rem; margin-bottom:6px;">暂无背离信号</div>
-        <div>当前没有大周期连续 ≥5 周期且小周期反向的标的</div>
+    <div id="turningEmpty" class="tp-empty" style="display:none">
+        <div style="font-size:1.1rem; margin-bottom:6px;">暂无转折信号</div>
+        <div>当前没有 SAR 和 MA10 同时确认的转折标的</div>
     </div>
-    <div id="divergenceGrid" class="divergence-grid" style="display:none"></div>
+    <div id="turningGrid" class="tp-grid" style="display:none"></div>
     </div>
 
     <div id="view-manage" class="view">
@@ -579,8 +581,8 @@
         <button class="nav-item active" id="nav-monitor" onclick="switchTab('monitor')">
             <span class="nav-icon">📊</span><span class="nav-label">监控</span>
         </button>
-        <button class="nav-item" id="nav-divergence" onclick="switchTab('divergence')">
-            <span class="nav-icon">🔄</span><span class="nav-label">背离</span>
+        <button class="nav-item" id="nav-turning" onclick="switchTab('turning')">
+            <span class="nav-icon">🔄</span><span class="nav-label">转折</span>
         </button>
         <button class="nav-item" id="nav-manage" onclick="switchTab('manage')">
             <span class="nav-icon">⚙️</span><span class="nav-label">管理</span>
@@ -596,7 +598,7 @@
         let currentSort = 'position';
         const POSITIONS_KEY = 'ma10_positions';
         let positionsCache = {};
-        let divergenceCache = null;
+        let turningCache = null;
         let eventSource = null;
         let sseConnected = false;
         let pollFallbackTimer = null;
@@ -642,7 +644,7 @@
         function handleServerUpdate(payload) {
             if (payload.error) return;
             dataCache = payload.data;
-            divergenceCache = payload.divergence || [];
+            turningCache = payload.turning_points || [];
             if (payload.data && payload.data.length > 0) {
                 renderCards(dataCache);
                 if (payload.price_alerts) {
@@ -657,8 +659,8 @@
             }
             document.getElementById('loading').style.display = 'none';
             document.getElementById('skeleton').style.display = 'none';
-            if (document.getElementById('view-divergence').classList.contains('active')) {
-                renderDivergence(divergenceCache);
+            if (document.getElementById('view-turning').classList.contains('active')) {
+                renderTurningPoints(turningCache);
             }
         }
 
@@ -746,9 +748,9 @@
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
             var navEl = document.getElementById('nav-' + name);
             if (navEl) navEl.classList.add('active');
-            if (name === 'divergence') {
-                if (divergenceCache === null) loadDivergence();
-                else renderDivergence(divergenceCache);
+            if (name === 'turning') {
+                if (turningCache === null) loadTurningPoints();
+                else renderTurningPoints(turningCache);
             }
             if (name === 'manage') {
                 loadManageView();
@@ -756,29 +758,29 @@
             }
         }
 
-        // ====== Divergence ======
-        async function loadDivergence() {
-            const loading = document.getElementById('divergenceLoading');
-            const empty = document.getElementById('divergenceEmpty');
-            const grid = document.getElementById('divergenceGrid');
+        // ====== Turning Points ======
+        async function loadTurningPoints() {
+            const loading = document.getElementById('turningLoading');
+            const empty = document.getElementById('turningEmpty');
+            const grid = document.getElementById('turningGrid');
             loading.style.display = 'flex'; empty.style.display = 'none'; grid.style.display = 'none';
             try {
-                const res = await fetch('/api/divergence');
+                const res = await fetch('/api/turning-points');
                 const payload = await res.json();
-                divergenceCache = payload.data || [];
-                renderDivergence(divergenceCache);
+                turningCache = payload.data || [];
+                renderTurningPoints(turningCache);
             } catch(e) {
                 loading.style.display = 'none'; empty.style.display = 'block';
                 empty.innerHTML = '<div style="color:var(--down)">加载失败: ' + e.message + '</div>';
             }
         }
 
-        function renderDivergence(signals) {
-            const loading = document.getElementById('divergenceLoading');
-            const empty = document.getElementById('divergenceEmpty');
-            const grid = document.getElementById('divergenceGrid');
+        function renderTurningPoints(signals) {
+            const loading = document.getElementById('turningLoading');
+            const empty = document.getElementById('turningEmpty');
+            const grid = document.getElementById('turningGrid');
             loading.style.display = 'none';
-            const badge = document.getElementById('divergenceBadge');
+            const badge = document.getElementById('turningBadge');
             if (signals && signals.length > 0) {
                 var buyCount = signals.filter(function(s) { return s.signal === '买入信号'; }).length;
                 var sellCount = signals.length - buyCount;
@@ -794,15 +796,13 @@
                 if (a.signal === b.signal) return a.symbol.localeCompare(b.symbol);
                 return a.signal === '买入信号' ? -1 : 1;
             });
+            var typeLabels = {1: 'MA10明确拐头2周期', 2: 'MA10刚拐头+量能爆发', 3: 'MA10刚拐头+量递增'};
             var html = '';
             sorted.forEach(function(s) {
-                var cardCls = s.signal === '买入信号' ? 'divergence-card buy' : 'divergence-card sell';
-                var sigCls = s.signal === '买入信号' ? 'divergence-signal buy' : 'divergence-signal sell';
-                var chgCls = s.change_pct > 0 ? 'change-up' : (s.change_pct < 0 ? 'change-down' : '');
-                var chgSign = s.change_pct > 0 ? '+' : '';
-                var priceStr = s.last !== null ? s.last.toLocaleString('en-US', {maximumFractionDigits: 4}) : '-';
-                var pctStr = s.change_pct !== null ? chgSign + s.change_pct.toFixed(2) + '%' : '-';
-                html += '<div class="' + cardCls + '"><div class="divergence-header"><div class="divergence-symbol">' + s.symbol + '</div><div class="' + sigCls + '">' + s.signal + '</div></div><div class="divergence-detail"><div>价格: <span class="hl">' + priceStr + '</span> <span class="' + chgCls + '">' + pctStr + '</span></div><div>大周期: <span class="hl">' + s.big_interval + '</span> ' + s.big_trend + ' (' + s.big_consecutive + '周期)</div><div>小周期: <span class="hl">' + s.small_interval + '</span> ' + s.small_trend + ' (' + s.small_consecutive + '周期)</div></div></div>';
+                var cardCls = s.signal === '买入信号' ? 'tp-card buy' : 'tp-card sell';
+                var sigCls = s.signal === '买入信号' ? 'tp-signal buy' : 'tp-signal sell';
+                var priceStr = s.close !== null ? s.close.toLocaleString('en-US', {maximumFractionDigits: 4}) : '-';
+                html += '<div class="' + cardCls + '"><div class="tp-header"><div class="tp-symbol">' + s.symbol + '</div><div class="tp-interval">' + s.interval_name + '</div><div class="' + sigCls + '">' + s.signal + '</div></div><div class="tp-detail"><div>价格: <span class="hl">' + priceStr + '</span> | MA10: <span class="hl">' + (s.ma10 ? s.ma10.toFixed(4) : '-') + '</span></div><div>触发路径: <span class="tp-path">' + s.path + '</span></div><div>MA10条件: <span class="hl">类型' + s.ma10_type + '</span> — ' + (typeLabels[s.ma10_type] || '') + '</div><div>MA10连续: <span class="hl">' + s.ma10_consecutive + '周期</span> | SAR连续: <span class="hl">' + s.sar_consecutive + '周期</span></div></div></div>';
             });
             grid.innerHTML = html;
         }
@@ -983,10 +983,10 @@
             var html = '';
             var stats = { total: data.length, dayUp: 0, dayDown: 0, fourHUp: 0, fourHDown: 0, hourUp: 0, hourDown: 0, minUp: 0, minDown: 0 };
             var positions = loadPositions();
-            var symDivergence = {};
-            (divergenceCache || []).forEach(function(d) {
-                if (!symDivergence[d.symbol]) symDivergence[d.symbol] = [];
-                symDivergence[d.symbol].push(d);
+            var symTurning = {};
+            (turningCache || []).forEach(function(d) {
+                if (!symTurning[d.symbol]) symTurning[d.symbol] = [];
+                symTurning[d.symbol].push(d);
             });
 
             var pw2 = function(p) { return p === 'short' ? 2 : (p === 'long' ? 1 : 0); };
@@ -1045,16 +1045,16 @@
                 var posClass = pos || '';
                 var cardClass = pos ? 'card ' + pos : 'card';
 
-                var divForSym = symDivergence[item.symbol] || [];
-                var hasBuy = divForSym.some(function(d) { return d.signal === '买入信号'; });
-                var hasSell = divForSym.some(function(d) { return d.signal === '卖出信号'; });
-                var divBadgeHtml = '';
-                if (divForSym.length > 0) {
-                    var bCls = hasBuy && !hasSell ? 'buy' : (hasSell && !hasBuy ? 'sell' : 'mixed');
-                    var bLabel = hasBuy && hasSell ? 'B/S' : (hasBuy ? 'B' : 'S');
-                    var bCount = divForSym.length > 1 ? divForSym.length : '';
-                    var bTitle = divForSym.map(function(d) { return d.signal + '(' + d.big_interval + '→' + d.small_interval + ')'; }).join('; ');
-                    divBadgeHtml = '<span class="card-div-badge ' + bCls + '" onclick="event.stopPropagation();switchTab(\'divergence\')" title="背离: ' + bTitle + '">' + bLabel + bCount + '</span>';
+                var tpForSym = symTurning[item.symbol] || [];
+                var hasTpBuy = tpForSym.some(function(d) { return d.signal === '买入信号'; });
+                var hasTpSell = tpForSym.some(function(d) { return d.signal === '卖出信号'; });
+                var tpBadgeHtml = '';
+                if (tpForSym.length > 0) {
+                    var bCls = hasTpBuy && !hasTpSell ? 'buy' : (hasTpSell && !hasTpBuy ? 'sell' : 'mixed');
+                    var bLabel = hasTpBuy && hasTpSell ? 'B/S' : (hasTpBuy ? 'B' : 'S');
+                    var bCount = tpForSym.length > 1 ? tpForSym.length : '';
+                    var bTitle = tpForSym.map(function(d) { return d.signal + '(' + d.interval_name + ' ' + d.path + ')'; }).join('; ');
+                    tpBadgeHtml = '<span class="card-div-badge ' + bCls + '" onclick="event.stopPropagation();switchTab(\'turning\')" title="转折: ' + bTitle + '">' + bLabel + bCount + '</span>';
                 }
 
                 var consData = '';
@@ -1066,7 +1066,7 @@
                     + '<span class="card-chart-icon" onclick="event.stopPropagation();openChartModal(\'' + item.symbol + '\', \'1d\')" title="打开K线图">📈</span>'
                     + '<div class="card-header">'
                     + '<div class="card-title"><span class="card-pos ' + posClass + '" onclick="showPositionDropdown(\'' + item.symbol + '\', event)" data-symbol="' + item.symbol + '" title="点击设置持仓">' + (posLabel || '＋') + '</span>'
-                    + item.symbol + divBadgeHtml
+                    + item.symbol + tpBadgeHtml
                     + '<span class="price-alert-bell" data-symbol="' + item.symbol + '" onclick="showPriceAlertPopup(\'' + item.symbol + '\', event)" title="价格提醒">🔔</span>'
                     + '</div>'
                     + '<div class="card-price"><div class="last">' + formatPrice(item.last) + '</div>'

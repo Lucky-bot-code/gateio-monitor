@@ -21,11 +21,12 @@ import requests
 from flask import Flask, jsonify, render_template, request, Response
 
 from monitor import MonitorCore, get_session, BASE_URL, CONFIG_FILE, _api_sem
-from alerts import analyze_divergence
+from alerts import analyze_turning_points
 from state import (
     load_positions, save_positions,
     load_price_alerts, save_price_alerts,
     init_db, get_cached_klines, store_klines,
+    load_tp_state, save_tp_state,
 )
 
 # ============ 配置 ============
@@ -58,7 +59,7 @@ cache = {
     "last_update": None,
     "updating": False,
     "error": None,
-    "divergence": [],
+    "turning_points": [],
     "price_alerts": {},
 }
 
@@ -118,7 +119,7 @@ def print_banner():
    +=======================================================+
    |                                                       |
    |     G A T E . I O   M A 1 0   M O N I T O R         |
-   |              Protocol v2.0  //  ONLINE                |
+   |              Protocol v3.0  //  ONLINE                |
    |                                                       |
    +=======================================================+
 """)
@@ -172,8 +173,17 @@ def refresh_data():
         data = monitor.analyze_all(progress_callback=progress_cb)
 
         cache["data"] = data
-        cache["divergence"] = analyze_divergence(data)
-        cache["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        tp_state = load_tp_state()
+        alerts, new_state, pending = analyze_turning_points(data, tp_state)
+        save_tp_state(new_state)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for a in alerts:
+            a["timestamp"] = now_str
+        cache["turning_points"] = alerts
+        cache["last_update"] = now_str
+        # 调度中途检查
+        for p in pending:
+            schedule_mid_check(p)
 
         # 价格提醒检测
         triggered_alerts = []
@@ -213,7 +223,7 @@ def refresh_data():
         # SSE 推送
         sse_manager.publish({
             "data": cache["data"],
-            "divergence": cache["divergence"],
+            "turning_points": cache["turning_points"],
             "price_alerts": cache["price_alerts"],
             "last_update": cache["last_update"],
             "updating": False,
@@ -264,6 +274,125 @@ def auto_refresh_loop():
         refresh_data()
 
 
+# ============ 中途检查调度器 ============
+
+_HALF_PERIODS = {
+    "1d": 43200,   # 12h
+    "4h": 7200,    # 2h
+    "1h": 1800,    # 30m
+    "15m": 450,    # 7.5m
+}
+_MID_CHECK_BUFFER = 15  # 单标的fetch耗时约5s，留15s余量
+
+_mid_checks = []
+_mid_checks_lock = threading.Lock()
+
+
+def schedule_mid_check(pending_item: dict):
+    """将一个待检查项加入调度队列。fire_time 精确到半程 - buffer。"""
+    interval = pending_item["interval"]
+    half_sec = _HALF_PERIODS.get(interval, 1800)
+    fire_at = time.time() + half_sec - _MID_CHECK_BUFFER
+    with _mid_checks_lock:
+        # 去重
+        existing = [c for c in _mid_checks if c["item"]["symbol"] == pending_item["symbol"]
+                    and c["item"]["interval"] == pending_item["interval"]]
+        if not existing:
+            _mid_checks.append({"fire_at": fire_at, "item": pending_item})
+            print(f"  [转折预警] 调度中途检查: {pending_item['symbol']} {pending_item['interval_name']}"
+                  f" 将在 {datetime.fromtimestamp(fire_at).strftime('%H:%M:%S')} 触发")
+
+
+def _do_mid_check(pending_item: dict):
+    """执行中途检查：获取单标的最新数据并验证类型1条件。"""
+    symbol = pending_item["symbol"]
+    interval = pending_item["interval"]
+    interval_name = pending_item["interval_name"]
+    direction = pending_item["direction"]
+    prev_close = pending_item["close"]
+    prev_open_val = pending_item["prev_open"]
+
+    print(f"  [转折预警] 执行中途检查: {symbol} {interval_name}")
+    try:
+        monitor = MonitorCore()
+        # 找到合约名
+        contract = None
+        for s in monitor.symbols:
+            if s.get("user_symbol") == symbol:
+                contract = s["contract"]
+                break
+        if not contract:
+            return
+
+        session = get_session()
+        iv = monitor._process_interval(contract, interval, interval_name, session)
+
+        if iv.get("trend") == "数据不足":
+            return
+
+        close = iv.get("close")
+        ma10 = iv.get("ma10")
+        consecutive = iv.get("consecutive", 0)
+        open_price = iv.get("open")
+        prev_open_new = iv.get("prev_open")
+
+        if close is None or ma10 is None or consecutive < 2:
+            return
+
+        # 类型1条件：连续转折=2 + 价格同侧 + 开盘价确认
+        is_bullish = (direction == "bullish")
+        price_ok = close > ma10 if is_bullish else close < ma10
+        if not price_ok:
+            return
+
+        open_ok = False
+        if is_bullish and open_price is not None and prev_open_new is not None:
+            open_ok = open_price > prev_open_new
+        elif not is_bullish and open_price is not None and prev_open_new is not None:
+            open_ok = open_price < prev_open_new
+
+        if not open_ok:
+            return
+
+        # 条件满足，生成告警
+        alert = {
+            "symbol": symbol,
+            "interval_name": interval_name,
+            "interval": interval,
+            "signal": "买入信号" if is_bullish else "卖出信号",
+            "path": "中途确认",
+            "ma10_type": 1,
+            "sar_direction": direction,
+            "ma10_consecutive": consecutive,
+            "sar_consecutive": iv.get("sar_consecutive", 0),
+            "close": close,
+            "ma10": ma10,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        cache["turning_points"].append(alert)
+        print(f"  [转折预警] 中途确认! {symbol} {interval_name} 类型1 {alert['signal']}")
+
+    except Exception as e:
+        print(f"  [转折预警] 中途检查失败 {symbol} {interval_name}: {e}")
+
+
+def _mid_check_loop():
+    """后台线程：每秒检查是否有到期的中途检查项。"""
+    while True:
+        try:
+            time.sleep(1)
+            now = time.time()
+            with _mid_checks_lock:
+                due = [c for c in _mid_checks if c["fire_at"] <= now]
+                for c in due:
+                    _mid_checks.remove(c)
+            for c in due:
+                do_thread = threading.Thread(target=_do_mid_check, args=(c["item"],), daemon=True)
+                do_thread.start()
+        except Exception:
+            pass
+
+
 # ============ Flask 路由 ============
 
 @app.route("/")
@@ -280,16 +409,16 @@ def api_data():
         "last_update": cache["last_update"],
         "updating": cache["updating"],
         "error": cache["error"],
-        "divergence": cache["divergence"],
+        "turning_points": cache["turning_points"],
         "price_alerts": user_price_alerts,
         "next_refresh_in": get_next_refresh_in(),
     })
 
 
-@app.route("/api/divergence")
-def api_divergence():
+@app.route("/api/turning-points")
+def api_turning_points():
     return jsonify({
-        "data": cache["divergence"],
+        "data": cache["turning_points"],
         "last_update": cache["last_update"],
     })
 
@@ -329,7 +458,7 @@ def api_stream():
             # 首次连接时发送当前缓存
             initial = {
                 "data": cache["data"],
-                "divergence": cache["divergence"],
+                "turning_points": cache["turning_points"],
                 "price_alerts": cache["price_alerts"],
                 "last_update": cache["last_update"],
                 "updating": cache["updating"],
@@ -588,6 +717,7 @@ if __name__ == "__main__":
 
     threading.Thread(target=refresh_data, daemon=True).start()
     threading.Thread(target=auto_refresh_loop, daemon=True).start()
+    threading.Thread(target=_mid_check_loop, daemon=True).start()
 
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     logging.getLogger("flask.app").setLevel(logging.ERROR)

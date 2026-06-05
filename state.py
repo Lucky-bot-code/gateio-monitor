@@ -19,6 +19,7 @@ CACHE_FRESHNESS = {
 
 POSITIONS_FILE = "positions.json"
 PRICE_ALERTS_FILE = "price_alerts.json"
+TP_STATE_FILE = "tp_state.json"
 DB_PATH = "klines.db"
 
 
@@ -64,6 +65,25 @@ def load_price_alerts() -> Dict:
 
 def save_price_alerts(alerts: Dict):
     _atomic_write(PRICE_ALERTS_FILE, alerts)
+
+
+# ========== 转折预警状态持久化 ==========
+
+def load_tp_state() -> Dict:
+    """加载转折预警状态。
+    格式: {symbol: {interval: {sar_direction, last_flip_time, alerts_sent[]}}}
+    """
+    if os.path.exists(TP_STATE_FILE):
+        try:
+            with open(TP_STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_tp_state(state: Dict):
+    _atomic_write(TP_STATE_FILE, state)
 
 
 # ========== SQLite K线缓存 ==========

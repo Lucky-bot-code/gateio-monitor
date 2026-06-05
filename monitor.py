@@ -234,8 +234,8 @@ class MonitorCore:
         empty = {
             "name": interval_name, "interval": interval,
             "trend": "数据不足", "consecutive": 0,
-            "ma10": None, "close": None,
-            "reversal_pct": None,
+            "ma10": None, "close": None, "open": None,
+            "reversal_pct": None, "sar_flip": None, "sar_direction": "neutral",
             "candles_count": len(klines) if klines else 0,
         }
         if not klines or len(klines) < 20:
@@ -246,12 +246,6 @@ class MonitorCore:
         ma10 = self.calculate_ma(closes, period=10)
         valid_ma = [v for v in ma10 if v is not None]
         trend, consecutive, recent_ma = self.analyze_trend(ma10, min_consecutive=3)
-        cur_k = klines_sorted[-1]
-        prev_k = klines_sorted[-2] if len(klines_sorted) >= 2 else None
-        volume = float(cur_k["v"])
-        prev_volume = float(prev_k["v"]) if prev_k else 0
-        prev_high = float(prev_k["h"]) if prev_k else 0
-        prev_low = float(prev_k["l"]) if prev_k else float("inf")
 
         reversal_pct = None
         if consecutive >= 1 and trend not in ("数据不足", "震荡"):
@@ -266,6 +260,37 @@ class MonitorCore:
         sar_values = MonitorCore.calculate_sar(highs, lows)
         sar_trend, sar_consecutive = MonitorCore.analyze_sar_trend(sar_values, closes)
 
+        # SAR 翻转检测 + 方向判定
+        sar_flip = None
+        sar_direction = "neutral"
+        if len(sar_values) >= 2 and sar_values[-2] is not None and sar_values[-1] is not None:
+            prev_s = sar_values[-2]
+            cur_s = sar_values[-1]
+            cur_c = closes[-1]
+            if cur_s < cur_c:
+                sar_direction = "bullish"
+            elif cur_s > cur_c:
+                sar_direction = "bearish"
+            prev_c = closes[-2]
+            if prev_s > prev_c and cur_s < cur_c:
+                sar_flip = "bullish"
+            elif prev_s < prev_c and cur_s > cur_c:
+                sar_flip = "bearish"
+
+        # 价格/量数据
+        cur_k = klines_sorted[-1]
+        prev_k = klines_sorted[-2] if len(klines_sorted) >= 2 else None
+        prev2_k = klines_sorted[-3] if len(klines_sorted) >= 3 else None
+        open_price = float(cur_k["o"])
+        prev_open = float(prev_k["o"]) if prev_k else None
+        volume = float(cur_k["v"])
+        prev_volume = float(prev_k["v"]) if prev_k else 0
+        prev2_volume = float(prev2_k["v"]) if prev2_k else 0
+        prev_high = float(prev_k["h"]) if prev_k else 0
+        prev_low = float(prev_k["l"]) if prev_k else float("inf")
+        volumes_10 = [float(k["v"]) for k in klines_sorted[-10:]]
+        avg_volume_10 = round(sum(volumes_10) / len(volumes_10), 2) if volumes_10 else None
+
         return {
             "name": interval_name,
             "interval": interval,
@@ -273,15 +298,21 @@ class MonitorCore:
             "consecutive": consecutive,
             "ma10": round(valid_ma[-1], 4) if valid_ma else None,
             "close": round(closes[-1], 4),
+            "open": round(open_price, 4),
+            "prev_open": round(prev_open, 4) if prev_open is not None else None,
             "reversal_pct": round(reversal_pct, 2) if reversal_pct is not None else None,
             "candles_count": len(klines),
             "ma_series": [round(v, 2) for v in recent_ma] if recent_ma else [],
             "volume": round(volume, 2),
             "prev_volume": round(prev_volume, 2),
+            "prev2_volume": round(prev2_volume, 2),
+            "avg_volume_10": avg_volume_10,
             "prev_high": round(prev_high, 4),
             "prev_low": round(prev_low, 4) if prev_low != float("inf") else float("inf"),
             "sar_trend": sar_trend,
             "sar_consecutive": sar_consecutive,
+            "sar_flip": sar_flip,
+            "sar_direction": sar_direction,
         }
 
     def _fetch_symbol_data(self, sym_info: Dict) -> Dict:
