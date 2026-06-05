@@ -210,26 +210,31 @@ def analyze_turning_points(data: List[Dict], tp_state: Dict) -> Tuple[List[Dict]
                 }
 
                 # --- 检测待中途检查的类型1 ---
-                # 连续转折周期=1 且价格在MA10同侧 但不满足类型2/3 → 需要中途检查
+                # 连续转折周期=1 + 价格在MA10同侧 + 不满足类型2/3 → 需要中途检查
+                # 方向以 MA10 趋势为准（非 SAR 方向），由中途检查时再验证 SAR 同向
                 if consecutive == 1 and close is not None and ma10 is not None:
-                    price_ok = (close > ma10 if sar_direction == "bullish" else close < ma10)
-                    if price_ok:
-                        # 排除类型2
-                        is_type2 = (avg_volume_10 is not None and avg_volume_10 > 0 and volume > avg_volume_10)
-                        # 排除类型3
-                        is_type3 = (prev_volume is not None and prev2_volume is not None and volume > prev_volume > prev2_volume)
-                        if not is_type2 and not is_type3:
-                            pending.append({
-                                "symbol": symbol,
-                                "interval_name": iv["name"],
-                                "interval": interval,
-                                "direction": sar_direction,
-                                "ma10_consecutive": consecutive,
-                                "close": close,
-                                "ma10": ma10,
-                                "open": open_price,
-                                "prev_open": prev_open,
-                            })
+                    ma10_dir = _ma10_direction(consecutive, trend)
+                    if ma10_dir:
+                        price_ok = close > ma10 if ma10_dir == "bullish" else close < ma10
+                        if price_ok:
+                            # 排除类型2
+                            is_type2 = (avg_volume_10 is not None and avg_volume_10 > 0
+                                        and volume > avg_volume_10)
+                            # 排除类型3
+                            is_type3 = (prev_volume is not None and prev2_volume is not None
+                                        and volume > prev_volume > prev2_volume)
+                            if not is_type2 and not is_type3:
+                                pending.append({
+                                    "symbol": symbol,
+                                    "interval_name": iv["name"],
+                                    "interval": interval,
+                                    "direction": ma10_dir,
+                                    "ma10_consecutive": consecutive,
+                                    "close": close,
+                                    "ma10": ma10,
+                                    "open": open_price,
+                                    "prev_open": prev_open,
+                                })
 
     return alerts, new_state, pending
 

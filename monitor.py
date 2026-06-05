@@ -32,7 +32,7 @@ def get_session() -> requests.Session:
     if not hasattr(_session_local, "session"):
         s = requests.Session()
         adapter = requests.adapters.HTTPAdapter(
-            pool_connections=20, pool_maxsize=20, max_retries=2
+            pool_connections=20, pool_maxsize=20, max_retries=1
         )
         s.mount("https://", adapter)
         if PROXY_URL:
@@ -68,7 +68,7 @@ class MonitorCore:
         try:
             url = f"{BASE_URL}/futures/usdt/tickers"
             with _api_sem:
-                resp = s.get(url, params={"contract": contract}, timeout=15)
+                resp = s.get(url, params={"contract": contract}, timeout=(10, 15))
             data = resp.json()
             if data and isinstance(data, list) and len(data) > 0:
                 return data[0]
@@ -88,7 +88,7 @@ class MonitorCore:
                     resp = s.get(
                         url,
                         params={"contract": contract, "interval": interval, "limit": limit},
-                        timeout=15,
+                        timeout=(10, 15),
                     )
                 data = resp.json()
                 if isinstance(data, list):

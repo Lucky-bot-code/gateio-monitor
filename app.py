@@ -12,7 +12,7 @@ import subprocess
 import threading
 import logging
 import importlib.metadata
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import gzip
 import io
@@ -130,19 +130,15 @@ def send_wecom_turning_alert(alert: dict) -> bool:
 
 
 
-def send_wecom_extreme_alert(s: dict) -> bool:
-    """发送极偏信号到企业微信（全量推送，无需订阅）。"""
-    if not WECOM_WEBHOOK_URL:
+def send_wecom_extreme_alerts(signals: list) -> bool:
+    """批量推送极偏信号到企业微信（精简汇总，无需订阅）。"""
+    if not WECOM_WEBHOOK_URL or not signals:
         return False
-    label = s["label"]
-    emoji = "🟢" if label == "极多" else "🔴"
-    content = f"""**⚡ 极偏信号 · {label}**
-> {emoji} **{s['symbol']}** · {s['interval_name']}
-> 偏离: {s['dev_cur']:.2f}% (均偏 {s['dev_avg']:.2f}% / 极偏 {s['dev_max']:.2f}%)
-> 涨跌幅: {s['chg_cur']:.2f}% (平均 {s['chg_avg']:.2f}% / 最大 {s['chg_max']:.2f}%)
-> MA10 连续: {s['consecutive']}周期 / SAR 连续: {s['sar_consecutive']}周期
-> 价格: {s.get('close', '-')} / MA10: {s.get('ma10', '-')}
-> 条件: 偏离=极偏 + 偏离>=均偏×3 + 涨跌幅=最大 + 涨跌幅>=平均×3"""
+    lines = ["**⚡ 极偏信号汇总**", ""]
+    for s in signals:
+        emoji = "🟢" if s["label"] == "极多" else "🔴"
+        lines.append(f"> {emoji} **{s['symbol']}** · {s['interval_name']} · **{s['label']}**")
+    content = "\n".join(lines)
     payload = {"msgtype": "markdown", "markdown": {"content": content}}
     try:
         resp = requests.post(WECOM_WEBHOOK_URL, json=payload, timeout=15)
@@ -264,29 +260,44 @@ def refresh_data():
             if pushed:
                 print(f"  [企业微信推送] 已推送 {pushed} 条预警")
 
-        # 极偏信号检测（全量推送，无需订阅）
+        # 极偏信号检测（仅在每个周期的最后一次刷新时推送）
         extreme_signals = analyze_extreme_signals(data)
         if extreme_signals:
             global _extreme_sent
-            pushed_ext = 0
+            new_signals = []
             for s in extreme_signals:
-                key = (s["symbol"], s["interval"], s["label"])
+                iv = s["interval"]
+                # 判断当前刷新是否是该周期的"最后一次"
+                candle_end = _get_candle_end_time(iv)
+                if candle_end - time.time() > AUTO_REFRESH_INTERVAL:
+                    continue  # 非最后一次刷新，跳过
+                # 去重 key 绑定 candle 起始时间，每个周期可重新触发
+                candle_start = _get_candle_start(iv)
+                key_parts = (s["symbol"], iv, s["label"], candle_start)
+                key = "|".join(str(x) for x in key_parts)
                 if key not in _extreme_sent:
-                    if send_wecom_extreme_alert(s):
-                        _extreme_sent[key] = True
-                        pushed_ext += 1
-                        print(f"  [极偏推送] {s['symbol']} {s['interval_name']} {s['label']} "
-                              f"偏离:{s['dev_cur']:.2f}% 涨跌:{s['chg_cur']:.2f}%")
-            if pushed_ext:
+                    _extreme_sent[key] = True
+                    new_signals.append(s)
+                    print(f"  [极偏推送] {s['symbol']} {s['interval_name']} {s['label']}")
+            if new_signals:
                 _save_extreme_sent()
-                print(f"  [极偏推送] 已推送 {pushed_ext} 条极偏信号")
-            # 定期裁剪去重缓存（保留最近 300 条）
-            if len(_extreme_sent) > 500:
-                _extreme_sent = dict(list(_extreme_sent.items())[-300:])
+                send_wecom_extreme_alerts(new_signals)
+                print(f"  [极偏推送] 已推送 {len(new_signals)} 条极偏信号")
+            # 裁剪过期去重缓存（保留最近 7 天）
+            cutoff = int(time.time()) - 86400 * 7
+            stale = [k for k in _extreme_sent if _extreme_sent.get(k) is True]
+            if len(stale) > 2000:
+                # 简单截断旧条目
+                keys = list(_extreme_sent.keys())
+                _extreme_sent = {k: True for k in keys[-1000:]}
                 _save_extreme_sent()
 
         cache["last_update"] = now_str
-        # 调度中途检查
+        # 清理同标的+周期的旧调度项，再调度新的中途检查
+        with _mid_checks_lock:
+            new_keys = {(p["symbol"], p["interval"]) for p in pending}
+            _mid_checks[:] = [c for c in _mid_checks
+                              if (c["item"]["symbol"], c["item"]["interval"]) not in new_keys]
         for p in pending:
             schedule_mid_check(p)
 
@@ -393,13 +404,66 @@ _mid_checks = []
 _mid_checks_lock = threading.Lock()
 
 
+def _get_next_candle_start(interval: str) -> float:
+    """计算下一个K线的起始UTC时间戳"""
+    now = datetime.now(timezone.utc)
+    if interval == "1d":
+        ns = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    elif interval == "4h":
+        block = now.hour // 4
+        next_hour = ((block + 1) * 4) % 24
+        if next_hour == 0:
+            ns = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        else:
+            ns = now.replace(hour=next_hour, minute=0, second=0, microsecond=0)
+    elif interval == "1h":
+        ns = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    elif interval == "15m":
+        block = now.minute // 15
+        next_minute = (block + 1) * 15
+        if next_minute >= 60:
+            ns = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        else:
+            ns = now.replace(minute=next_minute, second=0, microsecond=0)
+    else:
+        return time.time() + 3600
+    return ns.timestamp()
+
+
+def _get_candle_end_time(interval: str) -> float:
+    """当前K线的收盘UTC时间戳（同 _get_next_candle_start）。"""
+    return _get_next_candle_start(interval)
+
+
+def _get_candle_start(interval: str) -> int:
+    """当前K线的起始UTC时间戳（整数，用于去重key）。"""
+    now = datetime.now(timezone.utc)
+    if interval == "1d":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif interval == "4h":
+        hour = (now.hour // 4) * 4
+        start = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    elif interval == "1h":
+        start = now.replace(minute=0, second=0, microsecond=0)
+    elif interval == "15m":
+        minute = (now.minute // 15) * 15
+        start = now.replace(minute=minute, second=0, microsecond=0)
+    else:
+        start = now
+    return int(start.timestamp())
+
+
 def schedule_mid_check(pending_item: dict):
-    """将一个待检查项加入调度队列。fire_time 精确到半程 - buffer。"""
+    """将一个待检查项加入调度队列。fire_at 对齐下一个K线的半程点 - buffer。"""
     interval = pending_item["interval"]
     half_sec = _HALF_PERIODS.get(interval, 1800)
-    fire_at = time.time() + half_sec - _MID_CHECK_BUFFER
+    next_start = _get_next_candle_start(interval)
+    fire_at = next_start + half_sec - _MID_CHECK_BUFFER
+    # 如果半程点已过（滞后于当前时间），跳过
+    if fire_at <= time.time():
+        print(f"  [转折预警] 中途检查已过期，跳过: {pending_item['symbol']} {pending_item['interval_name']}")
+        return
     with _mid_checks_lock:
-        # 去重
         existing = [c for c in _mid_checks if c["item"]["symbol"] == pending_item["symbol"]
                     and c["item"]["interval"] == pending_item["interval"]]
         if not existing:
@@ -409,18 +473,27 @@ def schedule_mid_check(pending_item: dict):
 
 
 def _do_mid_check(pending_item: dict):
-    """执行中途检查：获取单标的最新数据并验证类型1条件。"""
+    """执行中途检查：获取单标最新数据，验证类型1条件 + SAR同向确认。"""
     symbol = pending_item["symbol"]
     interval = pending_item["interval"]
     interval_name = pending_item["interval_name"]
     direction = pending_item["direction"]
-    prev_close = pending_item["close"]
-    prev_open_val = pending_item["prev_open"]
 
     print(f"  [转折预警] 执行中途检查: {symbol} {interval_name}")
     try:
+        is_bullish = (direction == "bullish")
+        signal_label = "买入信号" if is_bullish else "卖出信号"
+
+        # 去重：检查 tp_state 是否已有同信号告警
+        tp_state = load_tp_state()
+        prev_state = tp_state.get(symbol, {}).get(interval, {})
+        prev_alerts = prev_state.get("alerts_sent", [])
+        for pa in prev_alerts:
+            if pa.get("signal") == signal_label and pa.get("interval") == interval:
+                print(f"  [转折预警] 中途检查跳过(已告警): {symbol} {interval_name}")
+                return
+
         monitor = MonitorCore()
-        # 找到合约名
         contract = None
         for s in monitor.symbols:
             if s.get("user_symbol") == symbol:
@@ -440,12 +513,18 @@ def _do_mid_check(pending_item: dict):
         consecutive = iv.get("consecutive", 0)
         open_price = iv.get("open")
         prev_open_new = iv.get("prev_open")
+        sar_direction = iv.get("sar_direction", "neutral")
 
         if close is None or ma10 is None or consecutive < 2:
             return
 
-        # 类型1条件：连续转折=2 + 价格同侧 + 开盘价确认
-        is_bullish = (direction == "bullish")
+        # SAR 必须保持同向
+        if sar_direction != direction:
+            print(f"  [转折预警] 中途检查失败 {symbol} {interval_name}: SAR方向不一致"
+                  f" (期望{direction} 实际{sar_direction})")
+            return
+
+        # 类型1条件：价格同侧 + 开盘价确认
         price_ok = close > ma10 if is_bullish else close < ma10
         if not price_ok:
             return
@@ -464,7 +543,7 @@ def _do_mid_check(pending_item: dict):
             "symbol": symbol,
             "interval_name": interval_name,
             "interval": interval,
-            "signal": "买入信号" if is_bullish else "卖出信号",
+            "signal": signal_label,
             "path": "中途确认",
             "ma10_type": 1,
             "sar_direction": direction,
@@ -474,6 +553,17 @@ def _do_mid_check(pending_item: dict):
             "ma10": ma10,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
+
+        # 写入 tp_state 防止后续重复告警
+        prev_alerts.append(alert)
+        tp_state[symbol] = tp_state.get(symbol, {})
+        tp_state[symbol][interval] = {
+            "sar_direction": sar_direction,
+            "last_flip_time": prev_state.get("last_flip_time"),
+            "alerts_sent": prev_alerts[-10:],
+        }
+        save_tp_state(tp_state)
+
         cache["turning_points"].append(alert)
         print(f"  [转折预警] 中途确认! {symbol} {interval_name} 类型1 {alert['signal']}")
 
