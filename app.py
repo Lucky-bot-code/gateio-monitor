@@ -584,6 +584,15 @@ def _do_mid_check(pending_item: dict):
         cache["turning_points"].append(alert)
         print(f"  [转折预警] 中途确认! {symbol} {interval_name} 类型1 {alert['signal']}")
 
+        # 企业微信订阅推送（推送后自动取消订阅）
+        if symbol in wecom_subscriptions and interval in wecom_subscriptions.get(symbol, []):
+            if send_wecom_turning_alert(alert):
+                print(f"  [企业微信推送] {symbol} {interval_name} {alert['signal']}")
+                wecom_subscriptions[symbol].remove(interval)
+                if not wecom_subscriptions[symbol]:
+                    del wecom_subscriptions[symbol]
+                save_wecom_subscriptions(wecom_subscriptions)
+
         # SSE 实时推送给前端（中途确认不在常规刷新周期内，需主动推送）
         sse_manager.publish({
             "data": cache["data"],
