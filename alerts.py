@@ -28,8 +28,8 @@ def check_ma10_condition(consecutive: int, close: float, ma10: float,
     if not price_ok:
         return None
 
-    # 类型1: 连续转折周期 >= 2 + 价格确认 + 开盘价确认
-    if consecutive >= 2 and open_price is not None and prev_open is not None:
+    # 类型1: 连续转折周期 2..5 + 价格确认 + 开盘价确认
+    if 2 <= consecutive <= 5 and open_price is not None and prev_open is not None:
         if is_bullish and open_price > prev_open:
             return 1
         elif not is_bullish and open_price < prev_open:
