@@ -1015,6 +1015,13 @@
       "last": 0,
       "change_percentage": 0,
       "volume_24h_quote": 0
+    },
+    {
+      "user_symbol": "PORTALUSDT",
+      "contract": "PORTAL_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0
     }
   ],
   "unavailable": [],

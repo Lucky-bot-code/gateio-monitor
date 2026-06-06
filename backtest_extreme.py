@@ -30,13 +30,13 @@ def analyze_trend_at_pos(ma_values, pos, min_consecutive=3):
     consecutive_up = 0
     consecutive_down = 0
     for i in range(len(valid_ma) - 2, -1, -1):
-        curr = round(valid_ma[i], 4)
-        nxt = round(valid_ma[i + 1], 4)
-        if nxt > curr:
+        curr = valid_ma[i]
+        nxt = valid_ma[i + 1]
+        if nxt - curr > 1e-10:
             if consecutive_down > 0:
                 break
             consecutive_up += 1
-        elif nxt < curr:
+        elif curr - nxt > 1e-10:
             if consecutive_up > 0:
                 break
             consecutive_down += 1

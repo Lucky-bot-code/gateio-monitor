@@ -786,8 +786,8 @@
             sorted.forEach(function(s) {
                 var cardCls = s.signal === '买入信号' ? 'tp-card buy' : 'tp-card sell';
                 var sigCls = s.signal === '买入信号' ? 'tp-signal buy' : 'tp-signal sell';
-                var priceStr = s.close !== null ? s.close.toLocaleString('en-US', {maximumFractionDigits: 4}) : '-';
-                html += '<div class="' + cardCls + '"><div class="tp-header"><div class="tp-symbol">' + s.symbol + '</div><div class="tp-interval">' + s.interval_name + '</div><div class="' + sigCls + '">' + s.signal + '</div></div><div class="tp-detail"><div>价格: <span class="hl">' + priceStr + '</span> | MA10: <span class="hl">' + (s.ma10 ? s.ma10.toFixed(4) : '-') + '</span></div><div>触发路径: <span class="tp-path">' + s.path + '</span></div><div>MA10条件: <span class="hl">类型' + s.ma10_type + '</span> — ' + (typeLabels[s.ma10_type] || '') + '</div><div>MA10连续: <span class="hl">' + s.ma10_consecutive + '周期</span> | SAR连续: <span class="hl">' + s.sar_consecutive + '周期</span></div></div></div>';
+                var priceStr = s.close !== null ? s.close.toLocaleString('en-US', {maximumFractionDigits: 8}) : '-';
+                html += '<div class="' + cardCls + '"><div class="tp-header"><div class="tp-symbol">' + s.symbol + '</div><div class="tp-interval">' + s.interval_name + '</div><div class="' + sigCls + '">' + s.signal + '</div></div><div class="tp-detail"><div>价格: <span class="hl">' + priceStr + '</span> | MA10: <span class="hl">' + (s.ma10 ? s.ma10.toFixed(8) : '-') + '</span></div><div>触发路径: <span class="tp-path">' + s.path + '</span></div><div>MA10条件: <span class="hl">类型' + s.ma10_type + '</span> — ' + (typeLabels[s.ma10_type] || '') + '</div><div>MA10连续: <span class="hl">' + s.ma10_consecutive + '周期</span> | SAR连续: <span class="hl">' + s.sar_consecutive + '周期</span></div></div></div>';
             });
             grid.innerHTML = html;
         }
@@ -919,7 +919,8 @@
             if (p === null || p === undefined) return '-';
             if (p >= 1000) return p.toLocaleString('en-US', {maximumFractionDigits: 2});
             if (p >= 1) return p.toFixed(4);
-            return p.toFixed(6);
+            if (p >= 0.01) return p.toFixed(6);
+            return p.toFixed(8);
         }
         function formatVolume(v) {
             if (v === null || v === undefined || v === 0) return '-';

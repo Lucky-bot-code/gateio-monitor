@@ -65,15 +65,22 @@ class MonitorCore:
 
     def fetch_ticker(self, contract: str, session=None) -> Optional[Dict]:
         s = session or get_session()
-        try:
-            url = f"{BASE_URL}/futures/usdt/tickers"
-            with _api_sem:
-                resp = s.get(url, params={"contract": contract}, timeout=(10, 15))
-            data = resp.json()
-            if data and isinstance(data, list) and len(data) > 0:
-                return data[0]
-        except Exception:
-            pass
+        last_error = None
+        for attempt in range(3):
+            try:
+                url = f"{BASE_URL}/futures/usdt/tickers"
+                with _api_sem:
+                    resp = s.get(url, params={"contract": contract}, timeout=(10, 15))
+                data = resp.json()
+                if data and isinstance(data, list) and len(data) > 0:
+                    return data[0]
+                last_error = data
+                time.sleep(1.0 * (attempt + 1))
+            except Exception as e:
+                last_error = str(e)
+                time.sleep(0.5 * (attempt + 1))
+        if last_error:
+            print(f"[WARN] fetch_ticker failed for {contract}: {last_error}", file=sys.stderr)
         return None
 
     def fetch_klines(
@@ -204,13 +211,13 @@ class MonitorCore:
         consecutive_up = 0
         consecutive_down = 0
         for i in range(len(valid_ma) - 2, -1, -1):
-            curr = round(valid_ma[i], 4)
-            nxt = round(valid_ma[i + 1], 4)
-            if nxt > curr:
+            curr = valid_ma[i]
+            nxt = valid_ma[i + 1]
+            if nxt - curr > 1e-10:
                 if consecutive_down > 0:
                     break
                 consecutive_up += 1
-            elif nxt < curr:
+            elif curr - nxt > 1e-10:
                 if consecutive_up > 0:
                     break
                 consecutive_down += 1
@@ -325,10 +332,10 @@ class MonitorCore:
             "interval": interval,
             "trend": trend,
             "consecutive": consecutive,
-            "ma10": round(valid_ma[-1], 4) if valid_ma else None,
-            "close": round(closes[-1], 4),
-            "open": round(open_price, 4),
-            "prev_open": round(prev_open, 4) if prev_open is not None else None,
+            "ma10": round(valid_ma[-1], 8) if valid_ma else None,
+            "close": round(closes[-1], 8),
+            "open": round(open_price, 8),
+            "prev_open": round(prev_open, 8) if prev_open is not None else None,
             "reversal_pct": round(reversal_pct, 2) if reversal_pct is not None else None,
             "candles_count": len(klines),
             "ma_series": [round(v, 2) for v in recent_ma] if recent_ma else [],
@@ -336,8 +343,8 @@ class MonitorCore:
             "prev_volume": round(prev_volume, 2),
             "prev2_volume": round(prev2_volume, 2),
             "avg_volume_10": avg_volume_10,
-            "prev_high": round(prev_high, 4),
-            "prev_low": round(prev_low, 4) if prev_low != float("inf") else float("inf"),
+            "prev_high": round(prev_high, 8),
+            "prev_low": round(prev_low, 8) if prev_low != float("inf") else float("inf"),
             "sar_trend": sar_trend,
             "sar_consecutive": sar_consecutive,
             "sar_flip": sar_flip,
@@ -378,7 +385,17 @@ class MonitorCore:
             ("1d", "日K"), ("4h", "4小时"), ("1h", "60分钟"), ("15m", "15分钟")
         ]:
             time.sleep(REQUEST_DELAY)
-            iv_data = self._process_interval(contract, interval, interval_name, session)
+            try:
+                iv_data = self._process_interval(contract, interval, interval_name, session)
+            except Exception as e:
+                print(f"[WARN] _process_interval failed for {contract}/{interval}: {e}", file=sys.stderr)
+                iv_data = {
+                    "name": interval_name, "interval": interval,
+                    "trend": "数据不足", "consecutive": 0,
+                    "ma10": None, "close": None, "open": None,
+                    "reversal_pct": None, "sar_flip": None, "sar_direction": "neutral",
+                    "candles_count": 0,
+                }
             result["intervals"].append(iv_data)
 
         return result
@@ -410,7 +427,13 @@ class MonitorCore:
             }
             results = [None] * total
             for future in as_completed(futures):
-                idx, data = future.result()
+                try:
+                    idx, data = future.result()
+                except Exception as e:
+                    orig_idx = futures[future]
+                    sym = self.symbols[orig_idx].get("user_symbol", self.symbols[orig_idx]["contract"])
+                    print(f"[WARN] {sym} fetch failed: {e}", file=sys.stderr)
+                    continue
                 results[idx] = data
 
         results = [r for r in results if r is not None]
