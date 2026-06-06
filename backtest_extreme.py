@@ -51,32 +51,29 @@ def analyze_trend_at_pos(ma_values, pos, min_consecutive=3):
     return "震荡", 0
 
 
-def analyze_sar_at_pos(sar_values, closes, pos, min_consecutive=3):
-    """在指定位置分析 SAR 趋势"""
-    n = min(pos + 1, min(len(sar_values), len(closes)))
+def analyze_sar_at_pos(sar_values, sar_states, closes, pos, min_consecutive=3):
+    """在指定位置分析 SAR 趋势（基于算法内部状态）。"""
+    n = min(pos + 1, min(len(sar_states), len(closes)))
     if n < min_consecutive + 1:
         return "数据不足", 0, "neutral"
     consecutive_bull = 0
     consecutive_bear = 0
     for i in range(n - 1, -1, -1):
-        sv = sar_values[i]
+        st = sar_states[i]
         cl = closes[i]
-        if sv is None or cl is None:
+        if st is None or cl is None:
             break
-        if sv < cl:
+        if st:
             if consecutive_bear > 0:
                 break
             consecutive_bull += 1
-        elif sv > cl:
+        else:
             if consecutive_bull > 0:
                 break
             consecutive_bear += 1
     direction = "neutral"
-    if sar_values[pos] is not None and closes[pos] is not None:
-        if sar_values[pos] < closes[pos]:
-            direction = "bullish"
-        elif sar_values[pos] > closes[pos]:
-            direction = "bearish"
+    if sar_states[pos] is not None:
+        direction = "bullish" if sar_states[pos] else "bearish"
     if consecutive_bull >= min_consecutive:
         return "连续上涨", consecutive_bull, direction
     elif consecutive_bear >= min_consecutive:
@@ -100,7 +97,7 @@ def backtest_interval(klines, interval_name):
 
     # 预计算全量 MA10 和 SAR
     ma10_all = MonitorCore.calculate_ma(closes, period=10)
-    sar_all = MonitorCore.calculate_sar(highs, lows)
+    sar_all, sar_states_all = MonitorCore.calculate_sar(highs, lows)
 
     results = defaultdict(lambda: {"极多": 0, "极空": 0})
 
@@ -109,7 +106,7 @@ def backtest_interval(klines, interval_name):
         if consecutive < 5:
             continue
 
-        sar_trend, sar_consecutive, sar_dir = analyze_sar_at_pos(sar_all, closes, pos)
+        sar_trend, sar_consecutive, sar_dir = analyze_sar_at_pos(sar_all, sar_states_all, closes, pos)
         if sar_consecutive < 5:
             continue
 

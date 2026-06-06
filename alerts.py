@@ -4,35 +4,6 @@
 from typing import List, Dict, Optional, Tuple
 
 
-# ============ SAR 翻转检测 ============
-
-def detect_sar_flip(sar_values: List[float], closes: List[float],
-                    highs: List[float], lows: List[float]) -> Optional[str]:
-    """检测最新K线是否发生SAR翻转。
-    返回: 'bullish' (多头翻转, SAR下穿价格), 'bearish' (空头翻转, SAR上穿价格), None
-    """
-    if len(sar_values) < 2 or len(closes) < 2:
-        return None
-
-    prev_sar = sar_values[-2]
-    cur_sar = sar_values[-1]
-    prev_close = closes[-2]
-    cur_close = closes[-1]
-
-    if prev_sar is None or cur_sar is None:
-        return None
-
-    # 多头翻转: SAR从价格上方 → 价格下方
-    if prev_sar > prev_close and cur_sar < cur_close:
-        return "bullish"
-
-    # 空头翻转: SAR从价格下方 → 价格上方
-    if prev_sar < prev_close and cur_sar > cur_close:
-        return "bearish"
-
-    return None
-
-
 # ============ MA10 转折条件检测 ============
 
 def check_ma10_condition(consecutive: int, close: float, ma10: float,
@@ -159,6 +130,8 @@ def analyze_turning_points(data: List[Dict], tp_state: Dict) -> Tuple[List[Dict]
                         "close": close,
                         "ma10": ma10,
                         "timestamp": None,  # 由调用方填充
+                        "volume_24h": item.get("volume_24h"),
+                        "candle_change_pct": round((close - open_price) / open_price * 100, 2) if (open_price and open_price != 0) else None,
                     }
 
             # --- 路径B: MA10先满足 → 验证SAR ---
@@ -186,6 +159,8 @@ def analyze_turning_points(data: List[Dict], tp_state: Dict) -> Tuple[List[Dict]
                                 "close": close,
                                 "ma10": ma10,
                                 "timestamp": None,
+                                "volume_24h": item.get("volume_24h"),
+                                "candle_change_pct": round((close - open_price) / open_price * 100, 2) if (open_price and open_price != 0) else None,
                             }
 
             if alert:
@@ -203,10 +178,19 @@ def analyze_turning_points(data: List[Dict], tp_state: Dict) -> Tuple[List[Dict]
                     "alerts_sent": prev_alerts[-10:],
                 }
             else:
+                # 清理跨周期残留告警：趋势震荡或方向反转时，同方向旧告警不再阻挡
+                prev_alerts_kept = prev_state.get("alerts_sent", [])
+                ma10_dir_for_clean = _ma10_direction(consecutive, trend)
+                if ma10_dir_for_clean is None:
+                    prev_alerts_kept = []
+                else:
+                    expected = "买入信号" if ma10_dir_for_clean == "bullish" else "卖出信号"
+                    prev_alerts_kept = [a for a in prev_alerts_kept if a.get("signal") == expected]
+
                 new_state[symbol][interval] = {
                     "sar_direction": sar_direction if sar_flip else prev_sar_dir,
                     "last_flip_time": prev_state.get("last_flip_time"),
-                    "alerts_sent": prev_state.get("alerts_sent", []),
+                    "alerts_sent": prev_alerts_kept,
                 }
 
                 # --- 检测待中途检查的类型1 ---
@@ -234,6 +218,7 @@ def analyze_turning_points(data: List[Dict], tp_state: Dict) -> Tuple[List[Dict]
                                     "ma10": ma10,
                                     "open": open_price,
                                     "prev_open": prev_open,
+                                    "volume_24h": item.get("volume_24h"),
                                 })
 
     return alerts, new_state, pending

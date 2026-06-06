@@ -247,9 +247,10 @@ def refresh_data():
             a["timestamp"] = now_str
         cache["turning_points"] = alerts
 
-        # 企业微信订阅推送
+        # 企业微信订阅推送（推送后自动取消订阅）
         if alerts and wecom_subscriptions:
             pushed = 0
+            unsub_list = []
             for a in alerts:
                 sym = a["symbol"]
                 iv = a["interval"]
@@ -257,8 +258,15 @@ def refresh_data():
                     if send_wecom_turning_alert(a):
                         pushed += 1
                         print(f"  [企业微信推送] {sym} {a['interval_name']} {a['signal']}")
+                        unsub_list.append((sym, iv))
             if pushed:
-                print(f"  [企业微信推送] 已推送 {pushed} 条预警")
+                for sym, iv in unsub_list:
+                    if sym in wecom_subscriptions and iv in wecom_subscriptions[sym]:
+                        wecom_subscriptions[sym].remove(iv)
+                        if not wecom_subscriptions[sym]:
+                            del wecom_subscriptions[sym]
+                save_wecom_subscriptions(wecom_subscriptions)
+                print(f"  [企业微信推送] 已推送 {pushed} 条预警（已自动取消订阅）")
 
         # 极偏信号检测（仅在每个周期的最后一次刷新时推送）
         extreme_signals = analyze_extreme_signals(data)
@@ -484,15 +492,7 @@ def _do_mid_check(pending_item: dict):
         is_bullish = (direction == "bullish")
         signal_label = "买入信号" if is_bullish else "卖出信号"
 
-        # 去重：检查 tp_state 是否已有同信号告警
-        tp_state = load_tp_state()
-        prev_state = tp_state.get(symbol, {}).get(interval, {})
-        prev_alerts = prev_state.get("alerts_sent", [])
-        for pa in prev_alerts:
-            if pa.get("signal") == signal_label and pa.get("interval") == interval:
-                print(f"  [转折预警] 中途检查跳过(已告警): {symbol} {interval_name}")
-                return
-
+        # 先拉数据，拿到当前趋势后再去重（避免旧告警跨周期残留阻挡）
         monitor = MonitorCore()
         contract = None
         for s in monitor.symbols:
@@ -538,7 +538,22 @@ def _do_mid_check(pending_item: dict):
         if not open_ok:
             return
 
-        # 条件满足，生成告警
+        # 条件满足，去重：检查 tp_state 是否已有同信号告警
+        # 先清理跨周期残留（趋势震荡或方向反转时旧告警不再阻挡）
+        tp_state = load_tp_state()
+        prev_state = tp_state.get(symbol, {}).get(interval, {})
+        prev_alerts = prev_state.get("alerts_sent", [])
+        if iv.get("trend") == "震荡":
+            prev_alerts = []
+        else:
+            prev_alerts = [a for a in prev_alerts if a.get("signal") == signal_label]
+        for pa in prev_alerts:
+            if pa.get("signal") == signal_label and pa.get("interval") == interval:
+                print(f"  [转折预警] 中途检查跳过(已告警): {symbol} {interval_name}")
+                return
+
+        # 生成告警
+        candle_change_pct = round((close - open_price) / open_price * 100, 2) if (open_price and open_price != 0) else None
         alert = {
             "symbol": symbol,
             "interval_name": interval_name,
@@ -552,6 +567,8 @@ def _do_mid_check(pending_item: dict):
             "close": close,
             "ma10": ma10,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "volume_24h": pending_item.get("volume_24h"),
+            "candle_change_pct": candle_change_pct,
         }
 
         # 写入 tp_state 防止后续重复告警
@@ -566,6 +583,15 @@ def _do_mid_check(pending_item: dict):
 
         cache["turning_points"].append(alert)
         print(f"  [转折预警] 中途确认! {symbol} {interval_name} 类型1 {alert['signal']}")
+
+        # SSE 实时推送给前端（中途确认不在常规刷新周期内，需主动推送）
+        sse_manager.publish({
+            "data": cache["data"],
+            "turning_points": cache["turning_points"],
+            "price_alerts": cache["price_alerts"],
+            "last_update": cache["last_update"],
+            "updating": False,
+        })
 
     except Exception as e:
         print(f"  [转折预警] 中途检查失败 {symbol} {interval_name}: {e}")
@@ -779,6 +805,7 @@ def api_symbols_add():
         "last": 0,
         "change_percentage": 0,
         "volume_24h_quote": 0,
+        "manual": True,
     })
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
@@ -895,6 +922,17 @@ def api_wecom_sub_toggle():
         wecom_subscriptions[symbol].append(interval)
         save_wecom_subscriptions(wecom_subscriptions)
         return jsonify({"status": "ok", "subscribed": True, "subscriptions": wecom_subscriptions})
+
+
+@app.route("/api/wecom-subscriptions", methods=["DELETE"])
+def api_wecom_subs_reset():
+    """一键重置所有企业微信订阅。"""
+    global wecom_subscriptions
+    n = sum(len(v) for v in wecom_subscriptions.values())
+    wecom_subscriptions = {}
+    save_wecom_subscriptions(wecom_subscriptions)
+    print(f"  [企业微信] 已重置全部 {n} 条订阅")
+    return jsonify({"status": "ok", "deleted": n, "subscriptions": {}})
 
 
 # ============ 启动工具 ============

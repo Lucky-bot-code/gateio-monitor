@@ -125,16 +125,23 @@ class MonitorCore:
 
     @staticmethod
     def calculate_sar(highs, lows, af_start=0.02, af_step=0.02, af_max=0.20):
-        """计算 Parabolic SAR，返回每个周期的 SAR 值列表"""
+        """计算 Parabolic SAR，返回 SAR 值列表 + 方向状态列表。
+
+        Returns: (sar_values, is_long_states)
+          sar_values[i]: SAR 值或 None
+          is_long_states[i]: True=多头, False=空头, None=无数据
+        """
         n = len(highs)
         sar = [None] * n
+        states = [None] * n
         if n < 2:
-            return sar
+            return sar, states
         is_long = True
         sar_val = lows[0]
         ep = highs[0]
         af = af_start
         sar[0] = sar_val
+        states[0] = is_long
         for i in range(1, n):
             if is_long:
                 sar_val = sar_val + af * (ep - sar_val)
@@ -148,6 +155,7 @@ class MonitorCore:
                     ep = lows[i]
                     af = af_start
                 sar[i] = sar_val
+                states[i] = is_long
                 if is_long and highs[i] > ep:
                     ep = highs[i]
                     af = min(af + af_step, af_max)
@@ -163,29 +171,30 @@ class MonitorCore:
                     ep = highs[i]
                     af = af_start
                 sar[i] = sar_val
+                states[i] = is_long
                 if not is_long and lows[i] < ep:
                     ep = lows[i]
                     af = min(af + af_step, af_max)
-        return sar
+        return sar, states
 
     @staticmethod
-    def analyze_sar_trend(sar_values, closes, min_consecutive=3):
-        """分析 SAR 相对价格的连续方向"""
-        n = min(len(sar_values), len(closes))
+    def analyze_sar_trend(sar_values, sar_states, closes, min_consecutive=3):
+        """分析 SAR 算法内部状态的连续方向（基于 high/low 突破，非收盘价）。"""
+        n = min(len(sar_states), len(closes))
         if n < min_consecutive + 1:
             return "数据不足", 0
         consecutive_bull = 0
         consecutive_bear = 0
         for i in range(n - 1, -1, -1):
-            sv = sar_values[i]
+            st = sar_states[i]
             cl = closes[i]
-            if sv is None or cl is None:
+            if st is None or cl is None:
                 break
-            if sv < cl:
+            if st:
                 if consecutive_bear > 0:
                     break
                 consecutive_bull += 1
-            elif sv > cl:
+            else:
                 if consecutive_bull > 0:
                     break
                 consecutive_bear += 1
@@ -264,24 +273,23 @@ class MonitorCore:
         # SAR 计算
         highs = [float(k["h"]) for k in klines_sorted]
         lows = [float(k["l"]) for k in klines_sorted]
-        sar_values = MonitorCore.calculate_sar(highs, lows)
-        sar_trend, sar_consecutive = MonitorCore.analyze_sar_trend(sar_values, closes)
+        sar_values, sar_states = MonitorCore.calculate_sar(highs, lows)
+        sar_trend, sar_consecutive = MonitorCore.analyze_sar_trend(sar_values, sar_states, closes)
 
-        # SAR 翻转检测 + 方向判定
+        # SAR 翻转检测 + 方向判定（基于算法内部状态，非收盘价）
         sar_flip = None
         sar_direction = "neutral"
-        if len(sar_values) >= 2 and sar_values[-2] is not None and sar_values[-1] is not None:
-            prev_s = sar_values[-2]
-            cur_s = sar_values[-1]
-            cur_c = closes[-1]
-            if cur_s < cur_c:
+        if len(sar_states) >= 2 and sar_states[-2] is not None and sar_states[-1] is not None:
+            prev_state = sar_states[-2]
+            cur_state = sar_states[-1]
+            if cur_state:
                 sar_direction = "bullish"
-            elif cur_s > cur_c:
+            else:
                 sar_direction = "bearish"
-            prev_c = closes[-2]
-            if prev_s > prev_c and cur_s < cur_c:
+            # 翻转：算法内部方向改变
+            if not prev_state and cur_state:
                 sar_flip = "bullish"
-            elif prev_s < prev_c and cur_s > cur_c:
+            elif prev_state and not cur_state:
                 sar_flip = "bearish"
 
         # 价格/量数据

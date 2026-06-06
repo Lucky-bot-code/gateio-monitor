@@ -252,8 +252,62 @@
             border-bottom: 1px solid var(--border);
             font-size: 0.75rem; color: var(--text-secondary);
             max-width: 1400px; margin: 0 auto;
+            display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
         }
+        .tp-reset-btn {
+            font-size: 0.7rem; padding: 3px 10px; border-radius: 10px;
+            border: 1px solid var(--border); background: var(--bg);
+            color: var(--text-secondary); cursor: pointer;
+            white-space: nowrap;
+        }
+        .tp-reset-btn:hover { border-color: #ef4444; color: #ef4444; }
         .tp-path { font-size: 0.7rem; padding: 2px 8px; border-radius: 8px; background: var(--bg); display: inline-block; }
+
+        /* Turning filter bar */
+        .tp-filter-bar {
+            display: flex; flex-wrap: wrap; gap: 8px 16px;
+            padding: 10px 20px; max-width: 1400px; margin: 0 auto;
+            align-items: center;
+        }
+        .tp-filter-group {
+            display: flex; align-items: center; gap: 4px;
+        }
+        .tp-filter-label {
+            font-size: 0.75rem; color: var(--text-secondary);
+            margin-right: 4px; white-space: nowrap;
+        }
+        .tp-filter-btn {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 14px; padding: 4px 12px;
+            font-size: 0.75rem; color: var(--text-secondary);
+            cursor: pointer; transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .tp-filter-btn:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+        .tp-filter-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+        /* Turning card meta */
+        .tp-card { cursor: pointer; }
+        .tp-meta { display: flex; gap: 12px; margin-top: 6px; font-size: 0.75rem; }
+        .tp-meta .tp-vol { color: var(--text-secondary); }
+        .tp-change-up { color: var(--up); font-weight: 600; }
+        .tp-change-down { color: var(--down); font-weight: 600; }
+
+        /* Toast notification */
+        .tp-toast {
+            position: fixed; bottom: 70px; left: 50%;
+            transform: translateX(-50%); z-index: 300;
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 8px; padding: 10px 20px;
+            font-size: 0.85rem; color: var(--text-primary);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            animation: tpToastIn 0.25s ease;
+        }
+        @keyframes tpToastIn {
+            from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+            to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+
         .tab-badge {
             display: inline-flex; align-items: center; justify-content: center;
             min-width: 18px; height: 18px; padding: 0 5px;
@@ -520,6 +574,7 @@
                 <option value="change_asc">涨跌幅: 低→高</option>
             </select>
             <span class="search-count" id="searchCount"></span>
+            <button class="tp-reset-btn" onclick="resetWecomSubs()" title="一键重置所有企业微信订阅" style="margin-left: auto;">重置订阅</button>
         </div>
         <div id="grid" class="grid" style="display:none"></div>
     </div>
@@ -527,7 +582,23 @@
 
     <div id="view-turning" class="view">
     <div class="tp-desc">
-        SAR↔MA10 双向验证转折预警：SAR翻转 + MA10转折确认同时满足时触发。
+        SAR↔MA10 双向验证转折预警：SAR翻转 + MA10转折确认同时满足时触发。点击卡片可添加持仓。推送后自动取消订阅。
+    </div>
+    <div class="tp-filter-bar" id="tpFilterBar">
+        <div class="tp-filter-group">
+            <span class="tp-filter-label">周期:</span>
+            <button class="tp-filter-btn active" data-filter="all" data-group="interval" onclick="onTpFilterChange(event)">全部</button>
+            <button class="tp-filter-btn" data-filter="1d" data-group="interval" onclick="onTpFilterChange(event)">日K</button>
+            <button class="tp-filter-btn" data-filter="4h" data-group="interval" onclick="onTpFilterChange(event)">4h</button>
+            <button class="tp-filter-btn" data-filter="1h" data-group="interval" onclick="onTpFilterChange(event)">1h</button>
+            <button class="tp-filter-btn" data-filter="15m" data-group="interval" onclick="onTpFilterChange(event)">15m</button>
+        </div>
+        <div class="tp-filter-group">
+            <span class="tp-filter-label">类型:</span>
+            <button class="tp-filter-btn active" data-filter="all" data-group="signal" onclick="onTpFilterChange(event)">全部</button>
+            <button class="tp-filter-btn" data-filter="buy" data-group="signal" onclick="onTpFilterChange(event)">买入信号</button>
+            <button class="tp-filter-btn" data-filter="sell" data-group="signal" onclick="onTpFilterChange(event)">卖出信号</button>
+        </div>
     </div>
     <div id="turningLoading" class="loading">
         <div class="spinner"></div><div>正在分析转折信号...</div>
@@ -606,6 +677,8 @@
         const POSITIONS_KEY = 'ma10_positions';
         let positionsCache = {};
         let turningCache = null;
+        let tpIntervalFilter = 'all';
+        let tpSignalFilter = 'all';
         let eventSource = null;
         let sseConnected = false;
         let pollFallbackTimer = null;
@@ -766,18 +839,27 @@
             const grid = document.getElementById('turningGrid');
             loading.style.display = 'none';
             const badge = document.getElementById('turningBadge');
-            if (signals && signals.length > 0) {
-                var buyCount = signals.filter(function(s) { return s.signal === '买入信号'; }).length;
-                var sellCount = signals.length - buyCount;
+            // Apply filters
+            var filtered = signals || [];
+            if (tpIntervalFilter !== 'all') {
+                filtered = filtered.filter(function(s) { return s.interval === tpIntervalFilter; });
+            }
+            if (tpSignalFilter !== 'all') {
+                var targetSignal = tpSignalFilter === 'buy' ? '买入信号' : '卖出信号';
+                filtered = filtered.filter(function(s) { return s.signal === targetSignal; });
+            }
+            if (filtered && filtered.length > 0) {
+                var buyCount = filtered.filter(function(s) { return s.signal === '买入信号'; }).length;
+                var sellCount = filtered.length - buyCount;
                 var badgeCls = 'mixed';
                 if (buyCount > 0 && sellCount === 0) badgeCls = 'buy';
                 else if (sellCount > 0 && buyCount === 0) badgeCls = 'sell';
                 badge.className = 'tab-badge ' + badgeCls;
-                badge.textContent = signals.length; badge.style.display = '';
+                badge.textContent = filtered.length; badge.style.display = '';
             } else { badge.style.display = 'none'; }
-            if (!signals || signals.length === 0) { empty.style.display = 'block'; grid.style.display = 'none'; return; }
+            if (!filtered || filtered.length === 0) { empty.style.display = 'block'; grid.style.display = 'none'; return; }
             empty.style.display = 'none'; grid.style.display = 'grid';
-            var sorted = signals.slice().sort(function(a, b) {
+            var sorted = filtered.slice().sort(function(a, b) {
                 if (a.signal === b.signal) return a.symbol.localeCompare(b.symbol);
                 return a.signal === '买入信号' ? -1 : 1;
             });
@@ -786,10 +868,98 @@
             sorted.forEach(function(s) {
                 var cardCls = s.signal === '买入信号' ? 'tp-card buy' : 'tp-card sell';
                 var sigCls = s.signal === '买入信号' ? 'tp-signal buy' : 'tp-signal sell';
-                var priceStr = s.close !== null ? s.close.toLocaleString('en-US', {maximumFractionDigits: 8}) : '-';
-                html += '<div class="' + cardCls + '"><div class="tp-header"><div class="tp-symbol">' + s.symbol + '</div><div class="tp-interval">' + s.interval_name + '</div><div class="' + sigCls + '">' + s.signal + '</div></div><div class="tp-detail"><div>价格: <span class="hl">' + priceStr + '</span> | MA10: <span class="hl">' + (s.ma10 ? s.ma10.toFixed(8) : '-') + '</span></div><div>触发路径: <span class="tp-path">' + s.path + '</span></div><div>MA10条件: <span class="hl">类型' + s.ma10_type + '</span> — ' + (typeLabels[s.ma10_type] || '') + '</div><div>MA10连续: <span class="hl">' + s.ma10_consecutive + '周期</span> | SAR连续: <span class="hl">' + s.sar_consecutive + '周期</span></div></div></div>';
+                var priceStr = formatPrice(s.close);
+                var volStr = formatVolume(s.volume_24h);
+                var chgStr = '';
+                var chgCls = '';
+                if (s.candle_change_pct !== null && s.candle_change_pct !== undefined) {
+                    chgStr = (s.candle_change_pct >= 0 ? '+' : '') + s.candle_change_pct.toFixed(2) + '%';
+                    chgCls = s.candle_change_pct >= 0 ? 'tp-change-up' : 'tp-change-down';
+                } else {
+                    chgStr = '-';
+                }
+                html += '<div class="' + cardCls + '" onclick="showTurningPositionMenu(\'' + s.symbol + '\', \'' + s.signal + '\', \'' + s.interval + '\', event)">'
+                    + '<div class="tp-header"><div class="tp-symbol">' + s.symbol + '</div><div class="tp-interval">' + s.interval_name + '</div><div class="' + sigCls + '">' + s.signal + '</div></div>'
+                    + '<div class="tp-detail">'
+                    + '<div>价格: <span class="hl">' + priceStr + '</span> | MA10: <span class="hl">' + (s.ma10 ? s.ma10.toFixed(8) : '-') + '</span></div>'
+                    + '<div>触发路径: <span class="tp-path">' + s.path + '</span></div>'
+                    + '<div>MA10条件: <span class="hl">类型' + s.ma10_type + '</span> — ' + (typeLabels[s.ma10_type] || '') + '</div>'
+                    + '<div>MA10连续: <span class="hl">' + s.ma10_consecutive + '周期</span> | SAR连续: <span class="hl">' + s.sar_consecutive + '周期</span></div>'
+                    + '<div class="tp-meta">'
+                    + '<span class="tp-vol">24h成交: ' + volStr + '</span>'
+                    + '<span class="' + chgCls + '">本周期涨幅: ' + chgStr + '</span>'
+                    + '</div></div></div>';
             });
             grid.innerHTML = html;
+        }
+
+        function onTpFilterChange(event) {
+            var btn = event.target;
+            var group = btn.getAttribute('data-group');
+            document.querySelectorAll('.tp-filter-btn[data-group="' + group + '"]').forEach(function(b) {
+                b.classList.remove('active');
+            });
+            btn.classList.add('active');
+            var intervalBtn = document.querySelector('.tp-filter-btn.active[data-group="interval"]');
+            var signalBtn = document.querySelector('.tp-filter-btn.active[data-group="signal"]');
+            tpIntervalFilter = intervalBtn ? intervalBtn.getAttribute('data-filter') : 'all';
+            tpSignalFilter = signalBtn ? signalBtn.getAttribute('data-filter') : 'all';
+            if (turningCache) renderTurningPoints(turningCache);
+        }
+
+        function showTurningPositionMenu(symbol, signal, interval, event) {
+            event.stopPropagation();
+            closePositionDropdown();
+            var isBuy = signal === '买入信号';
+            var positionType = isBuy ? 'long' : 'short';
+            var positionLabel = isBuy ? '＋ 添加多头' : '＋ 添加空头';
+            var rect = event.currentTarget.getBoundingClientRect();
+            var dropdown = document.createElement('div');
+            dropdown.className = 'pos-dropdown'; dropdown.id = 'posDropdown';
+
+            var chartBtn = document.createElement('button');
+            chartBtn.className = 'pos-dropdown-option';
+            chartBtn.textContent = '📈 查看K线图';
+            chartBtn.onclick = function(e2) {
+                e2.stopPropagation();
+                closePositionDropdown();
+                openChartModal(symbol, interval);
+            };
+            dropdown.appendChild(chartBtn);
+
+            var btn = document.createElement('button');
+            btn.className = 'pos-dropdown-option ' + positionType;
+            btn.textContent = positionLabel;
+            btn.onclick = function(e2) {
+                e2.stopPropagation();
+                selectPosition(symbol, positionType);
+                showTpToast(symbol + ' 已设为' + (isBuy ? '多头' : '空头'));
+            };
+            dropdown.appendChild(btn);
+            var cancel = document.createElement('button');
+            cancel.className = 'pos-dropdown-option';
+            cancel.textContent = '取消';
+            cancel.style.color = 'var(--text-secondary)';
+            cancel.onclick = function(e2) { e2.stopPropagation(); closePositionDropdown(); };
+            dropdown.appendChild(cancel);
+            var left = Math.max(4, rect.left + rect.width / 2 - 40);
+            if (left + 80 > window.innerWidth - 4) left = window.innerWidth - 84;
+            dropdown.style.top = (rect.bottom + 4) + 'px';
+            dropdown.style.left = left + 'px';
+            document.body.appendChild(dropdown);
+            setTimeout(function() { document.addEventListener('click', closePositionDropdown); }, 0);
+        }
+
+        function showTpToast(message) {
+            var existing = document.getElementById('tpToast');
+            if (existing) existing.remove();
+            var toast = document.createElement('div');
+            toast.id = 'tpToast';
+            toast.className = 'tp-toast';
+            toast.textContent = '✓ ' + message;
+            document.body.appendChild(toast);
+            setTimeout(function() { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.3s'; }, 2000);
+            setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 2400);
         }
 
         // ====== Positions ======
@@ -1436,6 +1606,18 @@
                 if (dataCache) renderCards(dataCache);
             })
             .catch(function(e) { console.error('订阅切换失败', e); });
+        }
+
+        function resetWecomSubs() {
+            if (!confirm('确定要重置所有企业微信订阅吗？')) return;
+            fetch('/api/wecom-subscriptions', { method: 'DELETE' })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    wecomSubs = data.subscriptions || {};
+                    if (dataCache) renderCards(dataCache);
+                    showTpToast('已重置 ' + data.deleted + ' 条订阅');
+                })
+                .catch(function(e) { console.error('重置订阅失败', e); });
         }
 
         function loadPriceAlertsFromServer() {
