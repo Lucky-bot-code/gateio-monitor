@@ -524,18 +524,15 @@ def _do_mid_check(pending_item: dict):
                   f" (期望{direction} 实际{sar_direction})")
             return
 
-        # 类型1条件：价格同侧 + 开盘价确认
+        # 类型1条件：价格同侧 + 当前K线收阳/收阴确认
         price_ok = close > ma10 if is_bullish else close < ma10
         if not price_ok:
             return
 
-        open_ok = False
-        if is_bullish and open_price is not None and prev_open_new is not None:
-            open_ok = open_price > prev_open_new
-        elif not is_bullish and open_price is not None and prev_open_new is not None:
-            open_ok = open_price < prev_open_new
-
-        if not open_ok:
+        if open_price is None or close is None:
+            return
+        candle_ok = close > open_price if is_bullish else close < open_price
+        if not candle_ok:
             return
 
         # 条件满足，去重：检查 tp_state 是否已有同信号告警
