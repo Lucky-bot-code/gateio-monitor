@@ -1,11 +1,11 @@
-# Gate.io MA10 趋势监控系统 v3.2
+# Gate.io MA10 趋势监控系统 v3.3
 
 基于 **Gate.io U本位永续合约 API** 的 MA10（10周期移动平均线）趋势监控系统。支持 **Web 可视化面板** 和 **命令行脚本**，实时监控加密货币与美股代币的多周期趋势。
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-2.0%2B-green)](https://flask.palletsprojects.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-v3.2-brightgreen)](.)
+[![Version](https://img.shields.io/badge/Version-v3.3-brightgreen)](.)
 
 ---
 
@@ -202,7 +202,7 @@ PROXY_URL = None
 
 ## 更新日志
 
-| 2026-06-05 | **v3.2** | 中途检查调度修复（5项）：fire_at 对齐K线边界而非简单延时、pending 方向改用 MA10 趋势、_do_mid_check 增加 tp_state 去重 + SAR 同向验证、旧调度项清理；极偏推送改为仅在周期最后一次刷新时推送（精简汇总格式）；极偏去重绑定 candle 起始时间（每周期可重新触发）；API 超时优化（max_retries 2→1, timeout 拆分为 (10s, 15s)） |
+| 2026-06-06 | **v3.3** | 低价格币 MA10 趋势修复：MA10 连续周期判断从 `round(4)` 改为 epsilon `1e-10`，修复 LUNCUSDT/PEPE/SHIB 等 <$0.01 币种始终显示"震荡"的问题；价格/MA10 显示精度从 `round(4)` 提升到 `round(8)`；数据获取稳定性加固：`fetch_ticker` 增加3次重试、`_process_interval` 调用处异常隔离、`analyze_all` future 崩溃不再丢弃其他标的 |
 | 2026-06-05 | **v3.1** | 企业微信订阅推送（点击周期格子弹出菜单选择订阅，仅订阅标的+周期触发转折信号时推送）；极偏信号 v4 分周期阈值（日K K/J=2.5, 4h=3.0, 1h=4.0，15m 排除），MA10+S连续≥5 同向 + 四条件全满足触发，自动推送企业微信；极偏信号回测脚本 backtest_extreme.py；推送去重持久化 extreme_sent.json；前端清理旧筛选标签 |
 | 2026-06-05 | **v3.0** | 转折预警 v3：SAR↔MA10 双向验证框架替换旧周期背离；两条触发路径(SA先/MA10先) + MA10 三类型条件；类型1 中途提前确认机制（1.5周期调度单标获取）；移除 /api/divergence 端点，新增 /api/turning-points；前端转折预警独立标签页；四周期独立运行互不干扰 |
 | 2026-06-04 | **v2.2.1** | SAR 方向连续周期计数：卡片每个周期格子展示 SAR↑N（上涨）/ SAR↓N（下跌），≥3 加粗高亮；与 MA10 连续周期并排展示，双重验证趋势强度 |
