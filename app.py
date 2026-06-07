@@ -11,7 +11,15 @@ import socket
 import subprocess
 import threading
 import logging
-import importlib.metadata
+try:
+    from importlib.metadata import version as _pkg_version
+except ImportError:
+    def _pkg_version(pkg):
+        try:
+            import pkg_resources
+            return pkg_resources.get_distribution(pkg).version
+        except Exception:
+            return "?"
 from datetime import datetime, timedelta, timezone
 
 import gzip
@@ -195,7 +203,7 @@ def print_banner():
     print("[INIT] Engaging network handshake protocol...")
     time.sleep(0.05)
     print("[ OK ] Module: requests  v" + requests.__version__)
-    print("[ OK ] Module: flask     v" + importlib.metadata.version("flask"))
+    print("[ OK ] Module: flask     v" + _pkg_version("flask"))
     print("[ OK ] Module: threading (ready)")
     print("[ OK ] Module: SQLite    (ready)")
     print("-" * 55)
