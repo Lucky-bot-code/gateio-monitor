@@ -1,7 +1,44 @@
 """
 转折预警 — SAR↔MA10 双向验证框架 v3
 """
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Tuple
+
+
+# ============ 蜡烛成熟度门控 ============
+
+_MATURITY_REMAINING = {
+    "1d": 7200,    # 剩余 < 2h
+    "4h": 1800,    # 剩余 < 30m
+    "1h": 600,     # 剩余 < 10m
+    "15m": 120,    # 剩余 < 2m
+}
+
+
+def _get_candle_end(interval: str) -> float:
+    """计算当前 K 线的收盘 UTC 时间戳"""
+    now = datetime.now(timezone.utc)
+    if interval == "1d":
+        ns = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    elif interval == "4h":
+        block = now.hour // 4
+        next_hour = ((block + 1) * 4) % 24
+        if next_hour == 0:
+            ns = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        else:
+            ns = now.replace(hour=next_hour, minute=0, second=0, microsecond=0)
+    elif interval == "1h":
+        ns = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    elif interval == "15m":
+        block = now.minute // 15
+        next_minute = (block + 1) * 15
+        if next_minute >= 60:
+            ns = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        else:
+            ns = now.replace(minute=next_minute, second=0, microsecond=0)
+    else:
+        return now.timestamp() + 3600
+    return ns.timestamp()
 
 
 # ============ MA10 转折条件检测 ============
@@ -88,6 +125,15 @@ def analyze_turning_points(data: List[Dict], tp_state: Dict) -> Tuple[List[Dict]
                 continue
 
             interval = iv["interval"]
+            # 5m/1m 短周期不参与转折预警
+            if interval in ("5m", "1m"):
+                continue
+            # 蜡烛成熟度门控：未成熟蜡烛不产生预警
+            max_remain = _MATURITY_REMAINING.get(interval)
+            if max_remain is not None:
+                remaining = _get_candle_end(interval) - datetime.now(timezone.utc).timestamp()
+                if remaining > max_remain:
+                    continue
             close = iv.get("close")
             ma10 = iv.get("ma10")
             consecutive = iv.get("consecutive", 0)
@@ -224,10 +270,118 @@ def analyze_turning_points(data: List[Dict], tp_state: Dict) -> Tuple[List[Dict]
     return alerts, new_state, pending
 
 
+# ============ 短周期 MA10↔SAR 双向验证 ============
+
+_SHORT_FLIP_STATE = {}  # {symbol: {interval: {ma10_dir, sar_dir}}}
+_SHORT_FLIP_FILE = "short_flip_state.json"
+
+
+def _load_short_flip_state():
+    global _SHORT_FLIP_STATE
+    import json, os
+    if os.path.exists(_SHORT_FLIP_FILE):
+        try:
+            with open(_SHORT_FLIP_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            # 兼容 v1 旧格式 {symbol: {interval: "bullish"}} → v2 {symbol: {interval: {ma10_dir, sar_dir}}}
+            if data:
+                sample = next(iter(data.values()))
+                if isinstance(sample, dict):
+                    first_inner = next(iter(sample.values())) if sample else None
+                    if isinstance(first_inner, str):
+                        data = {}  # 旧格式，清空重来
+                _SHORT_FLIP_STATE = data
+        except Exception:
+            pass
+    return _SHORT_FLIP_STATE
+
+
+def _save_short_flip_state():
+    global _SHORT_FLIP_STATE
+    import json, os
+    try:
+        with open(_SHORT_FLIP_FILE, "w", encoding="utf-8") as f:
+            json.dump(_SHORT_FLIP_STATE, f, ensure_ascii=False)
+    except Exception as e:
+        import sys
+        print(f"[WARN] Failed to save short flip state: {e}", file=sys.stderr)
+
+
+def check_short_period_subscriptions(data: List[Dict], wecom_subscriptions: Dict) -> List[Dict]:
+    """检查 5m/1m 企业微信订阅，MA10↔SAR 简化双向验证。
+
+    路径 A: MA10 刚翻转 → 验证 SAR 是否已同向
+    路径 B: SAR 刚翻转 → 验证 MA10 是否已同向
+
+    Returns: 待推送的 alert 列表
+    """
+    global _SHORT_FLIP_STATE
+    _load_short_flip_state()
+
+    alerts = []
+    for item in data:
+        sym = item["symbol"]
+        if sym not in wecom_subscriptions:
+            continue
+        for iv in item.get("intervals", []):
+            interval = iv["interval"]
+            if interval not in ("5m", "1m"):
+                continue
+            if interval not in wecom_subscriptions[sym]:
+                continue
+
+            # 当前 MA10 方向
+            trend = iv.get("trend", "")
+            ma10_dir = "bullish" if "上涨" in trend else ("bearish" if "下跌" in trend else None)
+            if ma10_dir is None:
+                continue
+
+            # 当前 SAR 方向 + 翻转
+            sar_dir = iv.get("sar_direction", "neutral")
+            sar_flip = iv.get("sar_flip")  # "bullish" / "bearish" / None
+
+            # 历史状态
+            prev = _SHORT_FLIP_STATE.get(sym, {}).get(interval) or {}
+            prev_ma10 = prev.get("ma10_dir")
+            prev_sar = prev.get("sar_dir")
+
+            alert = None
+
+            # 路径 A: MA10 刚翻转 → 验证 SAR 同向
+            if ma10_dir != prev_ma10 and prev_ma10 is not None:
+                if sar_dir == ma10_dir:
+                    alert = "买入信号" if ma10_dir == "bullish" else "卖出信号"
+
+            # 路径 B: SAR 刚翻转 → 验证 MA10 同向
+            if alert is None and sar_flip and sar_dir != prev_sar and prev_sar is not None:
+                if ma10_dir == sar_dir:
+                    alert = "买入信号" if sar_dir == "bullish" else "卖出信号"
+
+            # 更新状态
+            _SHORT_FLIP_STATE.setdefault(sym, {})[interval] = {"ma10_dir": ma10_dir, "sar_dir": sar_dir}
+
+            if alert:
+                path = "MA10先转" if ma10_dir != prev_ma10 else "SAR先转"
+                alerts.append({
+                    "symbol": sym,
+                    "interval": interval,
+                    "interval_name": iv.get("name", interval),
+                    "signal": alert,
+                    "path": path,
+                    "close": iv.get("close"),
+                    "ma10": iv.get("ma10"),
+                    "ma10_type": 0,
+                })
+
+    if alerts:
+        _save_short_flip_state()
+    return alerts
+
+
 # ============ 极偏信号检测 v4 ============
 
 # 排除的周期
-_EXTREME_EXCLUDE_INTERVALS = {"15m"}
+_EXTREME_EXCLUDE_INTERVALS = {"15m", "5m", "1m"}
 # 前置条件阈值
 _EXTREME_MIN_CONSECUTIVE = 5
 # 分周期倍数阈值: {interval: (K, J)}

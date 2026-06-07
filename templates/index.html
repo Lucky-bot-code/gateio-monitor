@@ -170,8 +170,11 @@
         .change-down { color: var(--down); }
         .card-price .volume { font-size: 0.68rem; color: var(--text-secondary); margin-top: 2px; }
         .intervals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-        @media (max-width: 560px) { .intervals { grid-template-columns: repeat(2, 1fr); } }
-        @media (max-width: 400px) { .intervals { grid-template-columns: 1fr; } }
+        .intervals.show-short { grid-template-columns: repeat(3, 1fr); }
+        @media (max-width: 560px) { .intervals { grid-template-columns: repeat(2, 1fr); } .intervals.show-short { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 400px) { .intervals { grid-template-columns: 1fr; } .intervals.show-short { grid-template-columns: repeat(2, 1fr); } }
+        .interval-item.short-period { display: none; }
+        .intervals.show-short .interval-item.short-period { display: block; }
         .interval-item {
             border-radius: 8px; padding: 8px 6px; text-align: center;
             border: 1px solid transparent; overflow: hidden;
@@ -525,6 +528,7 @@
             <div class="subtitle">Gate.io U本位永续合约市场 v3.0</div>
         </div>
         <div class="header-right">
+            <button class="theme-toggle" id="shortPeriodToggle" onclick="toggleShortPeriod()" title="显示/隐藏 5分钟 & 1分钟 短周期">⏱</button>
             <button class="theme-toggle" onclick="toggleTheme()" title="切换亮色/暗色主题">🌓</button>
             <span class="update-info" id="updateInfo"><span class="connection-dot poll" id="connDot"></span>加载中...</span>
             <button class="btn" id="refreshBtn" onclick="manualRefresh()">刷新 <span class="kbd">R</span></button>
@@ -549,6 +553,10 @@
         <div class="stat">1h下跌: <span id="statHourDown">-</span></div>
         <div class="stat">15m上涨: <span id="statMinUp">-</span></div>
         <div class="stat">15m下跌: <span id="statMinDown">-</span></div>
+        <div class="stat short-period-stat" style="display:none">5m上涨: <span id="stat5mUp">-</span></div>
+        <div class="stat short-period-stat" style="display:none">5m下跌: <span id="stat5mDown">-</span></div>
+        <div class="stat short-period-stat" style="display:none">1m上涨: <span id="stat1mUp">-</span></div>
+        <div class="stat short-period-stat" style="display:none">1m下跌: <span id="stat1mDown">-</span></div>
     </div>
 
 
@@ -639,6 +647,8 @@
             <div class="modal-header">
                 <span class="modal-title" id="modalTitle">BTCUSDT</span>
                 <div class="modal-interval-tabs">
+                    <button class="iv-btn" onclick="switchChartInterval('1m')">1m</button>
+                    <button class="iv-btn" onclick="switchChartInterval('5m')">5m</button>
                     <button class="iv-btn" onclick="switchChartInterval('15m')">15m</button>
                     <button class="iv-btn" onclick="switchChartInterval('1h')">1h</button>
                     <button class="iv-btn" onclick="switchChartInterval('4h')">4h</button>
@@ -726,6 +736,9 @@
             dataCache = payload.data;
             turningCache = payload.turning_points || [];
             if (payload.data && payload.data.length > 0) {
+                if (payload.wecom_subscriptions) {
+                    wecomSubs = payload.wecom_subscriptions;
+                }
                 renderCards(dataCache);
                 if (payload.price_alerts) {
                     priceAlertsCache = payload.price_alerts;
@@ -755,6 +768,39 @@
         (function() {
             const saved = localStorage.getItem('theme');
             if (saved) document.documentElement.setAttribute('data-theme', saved);
+        })();
+
+        // ====== Short period toggle ======
+        var _showShortPeriod = false;
+        function toggleShortPeriod() {
+            _showShortPeriod = !_showShortPeriod;
+            localStorage.setItem('showShortPeriod', _showShortPeriod ? '1' : '0');
+            applyShortPeriod();
+        }
+        function applyShortPeriod() {
+            var grids = document.querySelectorAll('#grid .intervals');
+            var stats = document.querySelectorAll('.short-period-stat');
+            var toggleBtn = document.getElementById('shortPeriodToggle');
+            for (var i = 0; i < grids.length; i++) {
+                if (_showShortPeriod) grids[i].classList.add('show-short');
+                else grids[i].classList.remove('show-short');
+            }
+            for (var j = 0; j < stats.length; j++) {
+                stats[j].style.display = _showShortPeriod ? '' : 'none';
+            }
+            if (toggleBtn) {
+                toggleBtn.style.opacity = _showShortPeriod ? '1' : '0.5';
+            }
+        }
+        (function() {
+            _showShortPeriod = localStorage.getItem('showShortPeriod') === '1';
+            // 延迟应用等卡片渲染完
+            var _initSpTimer = setInterval(function() {
+                if (document.querySelectorAll('#grid .intervals').length > 0) {
+                    clearInterval(_initSpTimer);
+                    applyShortPeriod();
+                }
+            }, 200);
         })();
 
         // ====== Keyboard shortcuts ======
@@ -1137,7 +1183,7 @@
         function renderCards(data) {
             var grid = document.getElementById('grid');
             var html = '';
-            var stats = { total: data.length, dayUp: 0, dayDown: 0, fourHUp: 0, fourHDown: 0, hourUp: 0, hourDown: 0, minUp: 0, minDown: 0 };
+            var stats = { total: data.length, dayUp: 0, dayDown: 0, fourHUp: 0, fourHDown: 0, hourUp: 0, hourDown: 0, minUp: 0, minDown: 0, fiveMUp: 0, fiveMDown: 0, oneMUp: 0, oneMDown: 0 };
             var positions = loadPositions();
             var symTurning = {};
             (turningCache || []).forEach(function(d) {
@@ -1173,7 +1219,8 @@
                     var indHtml = formatIndicators(iv);
                     var isWecomSub = wecomSubs[item.symbol] && wecomSubs[item.symbol].indexOf(iv.interval) !== -1;
                     var wecomBadgeHtml = isWecomSub ? '<span class="interval-wecom-badge" title="企业微信预警已订阅">W</span>' : '';
-                    intervalsHtml += '<div class="interval-item ' + tc + '" onclick="event.stopPropagation();showIntervalPopup(\'' + item.symbol + '\', \'' + iv.interval + '\', event)" title="点击查看选项">'
+                    var spCls = (iv.interval === '5m' || iv.interval === '1m') ? ' short-period' : '';
+                    intervalsHtml += '<div class="interval-item ' + tc + spCls + '" data-interval="' + iv.interval + '" onclick="event.stopPropagation();showIntervalPopup(\'' + item.symbol + '\', \'' + iv.interval + '\', event)" title="点击查看选项">'
                         + wecomBadgeHtml
                         + '<div class="name">' + iv.name + '</div>'
                         + '<div class="trend">' + iv.trend + ci + '</div>'
@@ -1197,6 +1244,14 @@
                     if (iv.name === '15分钟') {
                         if (iv.trend.indexOf('上涨') !== -1) stats.minUp++;
                         if (iv.trend.indexOf('下跌') !== -1) stats.minDown++;
+                    }
+                    if (iv.name === '5分钟') {
+                        if (iv.trend.indexOf('上涨') !== -1) stats.fiveMUp++;
+                        if (iv.trend.indexOf('下跌') !== -1) stats.fiveMDown++;
+                    }
+                    if (iv.name === '1分钟') {
+                        if (iv.trend.indexOf('上涨') !== -1) stats.oneMUp++;
+                        if (iv.trend.indexOf('下跌') !== -1) stats.oneMDown++;
                     }
                 });
 
@@ -1233,6 +1288,7 @@
 
             grid.innerHTML = html;
             grid.style.display = 'grid';
+            applyShortPeriod();
             document.getElementById('loading').style.display = 'none';
             document.getElementById('skeleton').style.display = 'none';
             document.getElementById('searchBar').style.display = 'flex';
@@ -1248,6 +1304,10 @@
             document.getElementById('statHourDown').textContent = stats.hourDown;
             document.getElementById('statMinUp').textContent = stats.minUp;
             document.getElementById('statMinDown').textContent = stats.minDown;
+            document.getElementById('stat5mUp').textContent = stats.fiveMUp;
+            document.getElementById('stat5mDown').textContent = stats.fiveMDown;
+            document.getElementById('stat1mUp').textContent = stats.oneMUp;
+            document.getElementById('stat1mDown').textContent = stats.oneMDown;
 
         }
 
@@ -1333,7 +1393,9 @@
             if (iv === '1d') return '1d';
             if (iv === '4h') return '4h';
             if (iv === '1h') return '1h';
-            return '15m';
+            if (iv === '15m') return '15m';
+            if (iv === '5m') return '5m';
+            return '1m';
         }
 
         function switchChartInterval(interval) {

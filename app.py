@@ -21,7 +21,7 @@ import requests
 from flask import Flask, jsonify, render_template, request, Response
 
 from monitor import MonitorCore, get_session, BASE_URL, CONFIG_FILE, _api_sem
-from alerts import analyze_turning_points, analyze_extreme_signals
+from alerts import analyze_turning_points, analyze_extreme_signals, check_short_period_subscriptions
 from state import (
     load_positions, save_positions,
     load_price_alerts, save_price_alerts,
@@ -268,6 +268,29 @@ def refresh_data():
                 save_wecom_subscriptions(wecom_subscriptions)
                 print(f"  [企业微信推送] 已推送 {pushed} 条预警（已自动取消订阅）")
 
+        # 短周期 5m/1m 企业微信订阅推送
+        if wecom_subscriptions:
+            short_alerts = check_short_period_subscriptions(data, wecom_subscriptions)
+            if short_alerts:
+                pushed2 = 0
+                unsub_list2 = []
+                for sa in short_alerts:
+                    sym = sa["symbol"]
+                    iv = sa["interval"]
+                    if sym in wecom_subscriptions and iv in wecom_subscriptions.get(sym, []):
+                        if send_wecom_turning_alert(sa):
+                            pushed2 += 1
+                            print(f"  [企业微信推送-短周期] {sym} {sa['interval_name']} {sa['signal']}")
+                            unsub_list2.append((sym, iv))
+                if pushed2:
+                    for sym, iv in unsub_list2:
+                        if sym in wecom_subscriptions and iv in wecom_subscriptions.get(sym, []):
+                            wecom_subscriptions[sym].remove(iv)
+                            if not wecom_subscriptions[sym]:
+                                del wecom_subscriptions[sym]
+                    save_wecom_subscriptions(wecom_subscriptions)
+                    print(f"  [企业微信推送] 短周期已推送 {pushed2} 条预警（已自动取消订阅）")
+
         # 极偏信号检测（仅在每个周期的最后一次刷新时推送）
         extreme_signals = analyze_extreme_signals(data)
         if extreme_signals:
@@ -349,6 +372,7 @@ def refresh_data():
             "data": cache["data"],
             "turning_points": cache["turning_points"],
             "price_alerts": cache["price_alerts"],
+            "wecom_subscriptions": wecom_subscriptions,
             "last_update": cache["last_update"],
             "updating": False,
             "next_refresh_in": get_next_refresh_in(),
@@ -374,7 +398,7 @@ def refresh_data():
 
 
 def _next_refresh_delay() -> float:
-    """计算到下一个对齐15分钟K线收盘的时间(秒)。提前115秒启动刷新，确保标的较多时也能在收盘前完成。"""
+    """计算到下一个对齐15分钟K线收盘的时间(秒)。提前60秒启动刷新。"""
     now = datetime.now()
     next_boundary = ((now.minute // 15) + 1) * 15
     target = now.replace(second=0, microsecond=0)
@@ -382,7 +406,7 @@ def _next_refresh_delay() -> float:
         target = target.replace(minute=0) + timedelta(hours=1)
     else:
         target = target.replace(minute=next_boundary)
-    target -= timedelta(seconds=115)
+    target -= timedelta(seconds=60)
     delay = (target - now).total_seconds()
     if delay < 5:
         delay += 900
@@ -398,6 +422,101 @@ def auto_refresh_loop():
         refresh_data()
 
 
+# ============ 短周期快速刷新 ============
+
+_fast_refresh_lock = threading.Lock()
+
+
+def fast_refresh_data():
+    """快速刷新：仅获取 5m/1m 数据，合并到缓存，不跑预警"""
+    global cache
+    if not _fast_refresh_lock.acquire(blocking=False):
+        return  # 上一轮还没跑完，跳过
+    try:
+        monitor = MonitorCore()
+        if not monitor.symbols:
+            return
+        fast_data = monitor.analyze_fast()
+        # 合并 5m/1m 数据到主缓存
+        existing = cache.get("data", [])
+        fast_map = {d["symbol"]: d for d in fast_data}
+        for item in existing:
+            fast_item = fast_map.get(item["symbol"])
+            if not fast_item:
+                continue
+            # 替换 price 相关字段
+            for key in ("last", "change_pct", "volume_24h"):
+                if fast_item.get(key) is not None:
+                    item[key] = fast_item[key]
+            # 替换 5m/1m interval
+            existing_ivs = item.get("intervals", [])
+            fast_iv_map = {iv["interval"]: iv for iv in fast_item.get("intervals", [])}
+            new_ivs = []
+            for iv in existing_ivs:
+                if iv["interval"] in ("5m", "1m"):
+                    replacement = fast_iv_map.get(iv["interval"])
+                    if replacement:
+                        new_ivs.append(replacement)
+                        continue
+                new_ivs.append(iv)
+            item["intervals"] = new_ivs
+        cache["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # 短周期企业微信订阅推送（必须在 SSE 推送前，确保前端收到的是已取消的订阅列表）
+        if wecom_subscriptions:
+            short_alerts = check_short_period_subscriptions(fast_data, wecom_subscriptions)
+            if short_alerts:
+                pushed = 0
+                unsub_list = []
+                for sa in short_alerts:
+                    sym = sa["symbol"]
+                    iv = sa["interval"]
+                    if sym in wecom_subscriptions and iv in wecom_subscriptions.get(sym, []):
+                        if send_wecom_turning_alert(sa):
+                            pushed += 1
+                            print(f"  [企业微信推送-短周期] {sym} {sa['interval_name']} {sa['signal']}")
+                            unsub_list.append((sym, iv))
+                if pushed:
+                    for sym, iv in unsub_list:
+                        if sym in wecom_subscriptions and iv in wecom_subscriptions.get(sym, []):
+                            wecom_subscriptions[sym].remove(iv)
+                            if not wecom_subscriptions[sym]:
+                                del wecom_subscriptions[sym]
+                    save_wecom_subscriptions(wecom_subscriptions)
+                    print(f"  [企业微信推送] 短周期已推送 {pushed} 条预警（已自动取消订阅）")
+        # SSE 推送更新后的数据 + 最新订阅列表
+        sse_manager.publish({
+            "data": cache["data"],
+            "turning_points": cache["turning_points"],
+            "price_alerts": cache["price_alerts"],
+            "wecom_subscriptions": wecom_subscriptions,
+            "last_update": cache["last_update"],
+            "updating": False,
+            "next_refresh_in": get_next_refresh_in(),
+        })
+    except Exception as e:
+        print(f"[WARN] Fast refresh failed: {e}", file=sys.stderr)
+    finally:
+        _fast_refresh_lock.release()
+
+
+def _fast_refresh_delay() -> float:
+    """计算到下一个 1 分钟 K 线收盘前 5 秒的等待秒数"""
+    now = datetime.now(timezone.utc)
+    ns = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    delay = (ns - now).total_seconds() - 5  # K 线收盘前 5s 拉，蜡烛走了 55s
+    if delay < 2:
+        delay += 60
+    return delay
+
+
+def fast_refresh_loop():
+    """后台快速刷新线程 - 每 60s 拉 5m/1m 数据"""
+    while True:
+        delay = _fast_refresh_delay()
+        time.sleep(delay)
+        fast_refresh_data()
+
+
 # ============ 中途检查调度器 ============
 
 _HALF_PERIODS = {
@@ -405,6 +524,8 @@ _HALF_PERIODS = {
     "4h": 7200,    # 2h
     "1h": 1800,    # 30m
     "15m": 450,    # 7.5m
+    "5m": 150,     # 2.5m
+    "1m": 30,      # 30s
 }
 _MID_CHECK_BUFFER = 15  # 单标的fetch耗时约5s，留15s余量
 
@@ -433,6 +554,15 @@ def _get_next_candle_start(interval: str) -> float:
             ns = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
         else:
             ns = now.replace(minute=next_minute, second=0, microsecond=0)
+    elif interval == "5m":
+        block = now.minute // 5
+        next_minute = (block + 1) * 5
+        if next_minute >= 60:
+            ns = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        else:
+            ns = now.replace(minute=next_minute, second=0, microsecond=0)
+    elif interval == "1m":
+        ns = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
     else:
         return time.time() + 3600
     return ns.timestamp()
@@ -456,6 +586,11 @@ def _get_candle_start(interval: str) -> int:
     elif interval == "15m":
         minute = (now.minute // 15) * 15
         start = now.replace(minute=minute, second=0, microsecond=0)
+    elif interval == "5m":
+        minute = (now.minute // 5) * 5
+        start = now.replace(minute=minute, second=0, microsecond=0)
+    elif interval == "1m":
+        start = now.replace(second=0, microsecond=0)
     else:
         start = now
     return int(start.timestamp())
@@ -595,6 +730,7 @@ def _do_mid_check(pending_item: dict):
             "data": cache["data"],
             "turning_points": cache["turning_points"],
             "price_alerts": cache["price_alerts"],
+            "wecom_subscriptions": wecom_subscriptions,
             "last_update": cache["last_update"],
             "updating": False,
         })
@@ -988,6 +1124,7 @@ if __name__ == "__main__":
 
     threading.Thread(target=refresh_data, daemon=True).start()
     threading.Thread(target=auto_refresh_loop, daemon=True).start()
+    threading.Thread(target=fast_refresh_loop, daemon=True).start()
     threading.Thread(target=_mid_check_loop, daemon=True).start()
 
     logging.getLogger("werkzeug").setLevel(logging.ERROR)

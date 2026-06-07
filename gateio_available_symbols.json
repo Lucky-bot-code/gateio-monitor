@@ -145,14 +145,6 @@
       "manual": true
     },
     {
-      "user_symbol": "OPNUSDT",
-      "contract": "OPN_USDT",
-      "last": 0,
-      "change_percentage": 0,
-      "volume_24h_quote": 0,
-      "manual": true
-    },
-    {
       "user_symbol": "ALLOUSDT",
       "contract": "ALLO_USDT",
       "last": 0,
@@ -171,6 +163,38 @@
     {
       "user_symbol": "VELVETUSDT",
       "contract": "VELVET_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0,
+      "manual": true
+    },
+    {
+      "user_symbol": "BANKUSDT",
+      "contract": "BANK_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0,
+      "manual": true
+    },
+    {
+      "user_symbol": "BLESSUSDT",
+      "contract": "BLESS_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0,
+      "manual": true
+    },
+    {
+      "user_symbol": "BEATUSDT",
+      "contract": "BEAT_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0,
+      "manual": true
+    },
+    {
+      "user_symbol": "SKYAIUSDT",
+      "contract": "SKYAI_USDT",
       "last": 0,
       "change_percentage": 0,
       "volume_24h_quote": 0,

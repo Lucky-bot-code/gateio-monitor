@@ -15,6 +15,8 @@ CACHE_FRESHNESS = {
     "4h": 28800,    # 8 小时
     "1h": 7200,     # 2 小时
     "15m": 1800,    # 30 分钟
+    "5m": 600,      # 10 分钟
+    "1m": 120,      # 2 分钟
 }
 
 POSITIONS_FILE = "positions.json"

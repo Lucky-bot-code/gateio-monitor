@@ -390,7 +390,8 @@ class MonitorCore:
 
         # 各周期串行获取 + 短延迟限流
         for interval, interval_name in [
-            ("1d", "日K"), ("4h", "4小时"), ("1h", "60分钟"), ("15m", "15分钟")
+            ("1d", "日K"), ("4h", "4小时"), ("1h", "60分钟"), ("15m", "15分钟"),
+            ("5m", "5分钟"), ("1m", "1分钟")
         ]:
             time.sleep(REQUEST_DELAY)
             try:
@@ -407,6 +408,80 @@ class MonitorCore:
             result["intervals"].append(iv_data)
 
         return result
+
+    _FAST_INTERVALS = [("5m", "5分钟"), ("1m", "1分钟")]
+
+    def _fetch_symbol_data_fast(self, sym_info: Dict) -> Dict:
+        """仅获取 ticker + 5m/1m 短周期数据"""
+        contract = sym_info["contract"]
+        user_symbol = sym_info.get("user_symbol", contract)
+        result = {"symbol": user_symbol, "contract": contract, "intervals": []}
+
+        session = get_session()
+        ticker = self.fetch_ticker(contract, session)
+        if ticker:
+            result["last"] = float(ticker.get("last", 0))
+            result["change_pct"] = float(ticker.get("change_percentage", 0))
+            result["volume_24h"] = float(ticker.get("volume_24h_quote", 0) or 0)
+        else:
+            result["last"] = None
+            result["change_pct"] = None
+            result["volume_24h"] = None
+
+        for interval, interval_name in self._FAST_INTERVALS:
+            time.sleep(REQUEST_DELAY)
+            try:
+                iv_data = self._process_interval(contract, interval, interval_name, session)
+            except Exception as e:
+                print(f"[WARN] fast refresh failed for {contract}/{interval}: {e}", file=sys.stderr)
+                iv_data = {
+                    "name": interval_name, "interval": interval,
+                    "trend": "数据不足", "consecutive": 0,
+                    "ma10": None, "close": None, "open": None,
+                    "reversal_pct": None, "sar_flip": None, "sar_direction": "neutral",
+                    "candles_count": 0,
+                }
+            result["intervals"].append(iv_data)
+        return result
+
+    def analyze_fast(self) -> List[Dict]:
+        """快速刷新：仅获取 5m/1m 短周期数据"""
+        results = []
+        total = len(self.symbols)
+        if total == 0:
+            return results
+        workers = min(5, max(3, total // 20))
+        print(f"[FAST] Fast refresh {total} symbols, {workers} workers...")
+
+        progress_lock = threading.Lock()
+        completed = [0]
+
+        def process_one(idx_sym):
+            idx, sym_info = idx_sym
+            data = self._fetch_symbol_data_fast(sym_info)
+            with progress_lock:
+                completed[0] += 1
+            return idx, data
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(process_one, (i, s)): i
+                for i, s in enumerate(self.symbols)
+            }
+            results = [None] * total
+            for future in as_completed(futures):
+                try:
+                    idx, data = future.result()
+                except Exception as e:
+                    orig_idx = futures[future]
+                    sym = self.symbols[orig_idx].get("user_symbol", self.symbols[orig_idx]["contract"])
+                    print(f"[WARN] {sym} fast fetch failed: {e}", file=sys.stderr)
+                    continue
+                results[idx] = data
+
+        results = [r for r in results if r is not None]
+        print(f"[ OK ] Fast refresh complete.")
+        return results
 
     def analyze_all(self, progress_callback=None) -> List[Dict]:
         results = []

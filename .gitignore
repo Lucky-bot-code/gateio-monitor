@@ -11,6 +11,7 @@ price_alerts.json
 klines.db
 tp_state.json
 wecom_subscriptions.json
+short_flip_state.json
 extreme_sent.json
 
 # Backup folders
