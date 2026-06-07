@@ -25,14 +25,6 @@
       "rank": 3
     },
     {
-      "user_symbol": "ZECUSDT",
-      "contract": "ZEC_USDT",
-      "last": 365.41,
-      "change_percentage": 6.77,
-      "volume_24h_quote": 185551327.0,
-      "rank": 4
-    },
-    {
       "user_symbol": "XAUUSDT",
       "contract": "XAU_USDT",
       "last": 4312.37,
@@ -123,86 +115,6 @@
     {
       "user_symbol": "IRYSUSDT",
       "contract": "IRYS_USDT",
-      "last": 0,
-      "change_percentage": 0,
-      "volume_24h_quote": 0,
-      "manual": true
-    },
-    {
-      "user_symbol": "NEARUSDT",
-      "contract": "NEAR_USDT",
-      "last": 0,
-      "change_percentage": 0,
-      "volume_24h_quote": 0,
-      "manual": true
-    },
-    {
-      "user_symbol": "BCHUSDT",
-      "contract": "BCH_USDT",
-      "last": 0,
-      "change_percentage": 0,
-      "volume_24h_quote": 0,
-      "manual": true
-    },
-    {
-      "user_symbol": "ALLOUSDT",
-      "contract": "ALLO_USDT",
-      "last": 0,
-      "change_percentage": 0,
-      "volume_24h_quote": 0,
-      "manual": true
-    },
-    {
-      "user_symbol": "BLUAIUSDT",
-      "contract": "BLUAI_USDT",
-      "last": 0,
-      "change_percentage": 0,
-      "volume_24h_quote": 0,
-      "manual": true
-    },
-    {
-      "user_symbol": "VELVETUSDT",
-      "contract": "VELVET_USDT",
-      "last": 0,
-      "change_percentage": 0,
-      "volume_24h_quote": 0,
-      "manual": true
-    },
-    {
-      "user_symbol": "BANKUSDT",
-      "contract": "BANK_USDT",
-      "last": 0,
-      "change_percentage": 0,
-      "volume_24h_quote": 0,
-      "manual": true
-    },
-    {
-      "user_symbol": "BLESSUSDT",
-      "contract": "BLESS_USDT",
-      "last": 0,
-      "change_percentage": 0,
-      "volume_24h_quote": 0,
-      "manual": true
-    },
-    {
-      "user_symbol": "BEATUSDT",
-      "contract": "BEAT_USDT",
-      "last": 0,
-      "change_percentage": 0,
-      "volume_24h_quote": 0,
-      "manual": true
-    },
-    {
-      "user_symbol": "SKYAIUSDT",
-      "contract": "SKYAI_USDT",
-      "last": 0,
-      "change_percentage": 0,
-      "volume_24h_quote": 0,
-      "manual": true
-    },
-    {
-      "user_symbol": "SIRENUSDT",
-      "contract": "SIREN_USDT",
       "last": 0,
       "change_percentage": 0,
       "volume_24h_quote": 0,

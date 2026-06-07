@@ -15,7 +15,7 @@ _MATURITY_REMAINING = {
     "1h": 600,     # 剩余 < 10m
     "15m": 120,    # 剩余 < 2m
     "5m": 60,      # 剩余 < 60s（快刷新每 60s 跑，只在 5m 蜡烛最后 1 分钟触发）
-    "1m": 10,      # 剩余 < 10s（快刷新提前 5s 拉，蜡烛走了 55s）
+    "1m": 12,      # 剩余 < 12s（快刷新提前 10s 拉，给点余量）
 }
 
 
@@ -320,11 +320,27 @@ def _save_short_flip_state():
         print(f"[WARN] Failed to save short flip state: {e}", file=sys.stderr)
 
 
-def check_short_period_subscriptions(data: List[Dict], wecom_subscriptions: Dict) -> List[Dict]:
-    """检查 5m/1m 企业微信订阅，MA10↔SAR 简化双向验证。
+def init_short_flip_baseline(symbol: str, interval: str,
+                              ma10_dir: str, sar_dir: str,
+                              ma10_cons: int, sar_cons: int):
+    """订阅时快照当前 MA10/SAR 状态作为翻转检测基线"""
+    global _SHORT_FLIP_STATE
+    _load_short_flip_state()
+    _SHORT_FLIP_STATE.setdefault(symbol, {})[interval] = {
+        "ma10_dir": ma10_dir,
+        "sar_dir": sar_dir,
+        "ma10_cons": ma10_cons,
+        "sar_cons": sar_cons,
+    }
+    _save_short_flip_state()
 
-    路径 A: MA10 刚翻转 → 验证 SAR 是否已同向
-    路径 B: SAR 刚翻转 → 验证 MA10 是否已同向
+
+def check_short_period_subscriptions(data: List[Dict], wecom_subscriptions: Dict) -> List[Dict]:
+    """检查 5m/1m 企业微信订阅 — 始终与订阅时基线对比。
+
+    订阅时快照 MA10/SAR 方向作为基线（init_short_flip_baseline），
+    后续每次只对比"当前 vs 基线"，不更新基线。
+    翻转告警后订阅自动取消，基线同步清理。
 
     Returns: 待推送的 alert 列表
     """
@@ -332,6 +348,8 @@ def check_short_period_subscriptions(data: List[Dict], wecom_subscriptions: Dict
     _load_short_flip_state()
 
     alerts = []
+    baselines_to_clean = []  # (sym, interval) 告警后需清理的基线
+
     for item in data:
         sym = item["symbol"]
         if sym not in wecom_subscriptions:
@@ -356,16 +374,18 @@ def check_short_period_subscriptions(data: List[Dict], wecom_subscriptions: Dict
             if ma10_dir is None:
                 continue
 
-            # 当前 SAR 方向 + 翻转
+            # 当前 SAR 方向
             sar_dir = iv.get("sar_direction", "neutral")
-            sar_flip = iv.get("sar_flip")  # "bullish" / "bearish" / None
 
-            # 历史状态
-            prev = _SHORT_FLIP_STATE.get(sym, {}).get(interval) or {}
-            prev_ma10 = prev.get("ma10_dir")
-            prev_sar = prev.get("sar_dir")
-            prev_ma10_cons = prev.get("ma10_cons", 0)
-            prev_sar_cons = prev.get("sar_cons", 0)
+            # 订阅时基线
+            baseline = _SHORT_FLIP_STATE.get(sym, {}).get(interval)
+            if not baseline:
+                # 没有基线：可能是旧订阅还没初始化，跳过本次，等下次
+                continue
+            bl_ma10 = baseline.get("ma10_dir")
+            bl_sar = baseline.get("sar_dir")
+            bl_ma10_cons = baseline.get("ma10_cons", 0)
+            bl_sar_cons = baseline.get("sar_cons", 0)
 
             # 当前连续次数
             cur_ma10_cons = iv.get("consecutive", 0)
@@ -373,38 +393,25 @@ def check_short_period_subscriptions(data: List[Dict], wecom_subscriptions: Dict
 
             alert = None
 
-            # 路径 A: MA10 刚翻转 → 验证 SAR 同向
-            if ma10_dir != prev_ma10 and prev_ma10 is not None:
-                if sar_dir == ma10_dir:
-                    alert = "买入信号" if ma10_dir == "bullish" else "卖出信号"
+            # 路径 A: MA10 偏离基线 → 验证 SAR 当前同向
+            if bl_ma10 and ma10_dir != bl_ma10 and sar_dir == ma10_dir:
+                alert = "买入信号" if ma10_dir == "bullish" else "卖出信号"
 
-            # 路径 B: SAR 方向变化（不依赖瞬时 sar_flip，避免翻转过期漏报）→ 验证 MA10 同向
-            if alert is None and sar_dir != prev_sar and prev_sar is not None and sar_dir != "neutral":
-                if ma10_dir == sar_dir:
-                    alert = "买入信号" if sar_dir == "bullish" else "卖出信号"
+            # 路径 B: SAR 偏离基线 → 验证 MA10 当前同向
+            if alert is None and bl_sar and sar_dir != bl_sar and sar_dir != "neutral" and ma10_dir == sar_dir:
+                alert = "买入信号" if sar_dir == "bullish" else "卖出信号"
 
-            # 噪音过滤：反向基线时，弱势方（连续次数少）翻转不报警
-            # 翻转方的旧连续次数须 ≥ 对方当前次数 × 3，才算"主导方投降"
-            if alert and prev_ma10 and prev_sar and prev_ma10 != prev_sar:
-                if ma10_dir != prev_ma10:
-                    # MA10 翻转：检查 MA10 是否是主导方
-                    if prev_ma10_cons < cur_sar_cons * DOMINANCE_RATIO:
+            # 噪音过滤：基线方向相反时，弱势方翻转不报警
+            if alert and bl_ma10 and bl_sar and bl_ma10 != bl_sar:
+                if ma10_dir != bl_ma10:
+                    if bl_ma10_cons < cur_sar_cons * DOMINANCE_RATIO:
                         alert = None
-                elif sar_dir != prev_sar:
-                    # SAR 翻转：检查 SAR 是否是主导方
-                    if prev_sar_cons < cur_ma10_cons * DOMINANCE_RATIO:
+                elif sar_dir != bl_sar:
+                    if bl_sar_cons < cur_ma10_cons * DOMINANCE_RATIO:
                         alert = None
-
-            # 更新状态（含连续次数）
-            _SHORT_FLIP_STATE.setdefault(sym, {})[interval] = {
-                "ma10_dir": ma10_dir,
-                "sar_dir": sar_dir,
-                "ma10_cons": cur_ma10_cons,
-                "sar_cons": cur_sar_cons,
-            }
 
             if alert:
-                path = "MA10先转" if ma10_dir != prev_ma10 else "SAR先转"
+                path = "MA10先转" if (bl_ma10 and ma10_dir != bl_ma10) else "SAR先转"
                 alerts.append({
                     "symbol": sym,
                     "interval": interval,
@@ -415,9 +422,17 @@ def check_short_period_subscriptions(data: List[Dict], wecom_subscriptions: Dict
                     "ma10": iv.get("ma10"),
                     "ma10_type": 0,
                 })
+                baselines_to_clean.append((sym, interval))
 
-    if alerts:
+    # 告警后清理基线（订阅会被 app.py 取消，基线同步删除）
+    for sym, interval in baselines_to_clean:
+        if sym in _SHORT_FLIP_STATE and interval in _SHORT_FLIP_STATE[sym]:
+            del _SHORT_FLIP_STATE[sym][interval]
+            if not _SHORT_FLIP_STATE[sym]:
+                del _SHORT_FLIP_STATE[sym]
+    if baselines_to_clean:
         _save_short_flip_state()
+
     return alerts
 
 

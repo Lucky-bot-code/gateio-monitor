@@ -1074,9 +1074,16 @@
             document.body.appendChild(dropdown);
             setTimeout(function() { document.addEventListener('click', closePositionDropdown); }, 0);
         }
-        async function removeSymbol(symbol) {
+        async function removeSymbol(symbol, fromManage) {
             closePositionDropdown();
             if (!confirm('确认从监控列表移除 ' + symbol + ' ？')) return;
+            // 先立即从 DOM 和缓存中移除，确保即时反馈
+            var card = document.getElementById('card-' + symbol);
+            if (card) card.remove();
+            if (dataCache) dataCache = dataCache.filter(function(d) { return d.symbol !== symbol; });
+            if (typeof renderCards === 'function') renderCards(dataCache);
+
+            // API 同步删除（best-effort，后端可能已无此标的）
             try {
                 var res = await fetch('/api/symbols', {
                     method: 'DELETE',
@@ -1084,12 +1091,26 @@
                     body: JSON.stringify({ symbol: symbol })
                 });
                 var data = await res.json();
-                if (data.error) { alert(data.error); return; }
-                var card = document.getElementById('card-' + symbol);
-                if (card) card.remove();
-                if (dataCache) dataCache = dataCache.filter(function(d) { return d.symbol !== symbol; });
-                if (typeof renderCards === 'function') renderCards(dataCache);
-            } catch(e) { alert('移除失败: ' + e.message); }
+                var apiMsg = '';
+                if (data.status === 'ok') {
+                    apiMsg = '已移除 ' + symbol;
+                } else if (data.error && data.error.indexOf('not found') !== -1) {
+                    apiMsg = symbol + ' 已从面板移除（配置中未找到）';
+                } else if (data.error) {
+                    apiMsg = symbol + ' 已从面板移除，但服务端: ' + data.error;
+                }
+                if (fromManage) {
+                    var mEl = document.getElementById('manageMsg');
+                    if (mEl) { mEl.textContent = apiMsg || '已移除 ' + symbol; mEl.style.color = 'var(--up)'; }
+                    loadManageView();
+                }
+            } catch(e) {
+                var errMsg = symbol + ' 已从面板移除，但请求失败: ' + e.message;
+                if (fromManage) {
+                    var me = document.getElementById('manageMsg');
+                    if (me) { me.textContent = errMsg; me.style.color = 'var(--down)'; }
+                }
+            }
         }
         function closePositionDropdown(e) {
             var ex = document.getElementById('posDropdown');
@@ -1827,7 +1848,7 @@
                 document.getElementById('manageCount').textContent = data.count;
                 var html = '';
                 (data.symbols || []).sort().forEach(function(s) {
-                    html += '<span class="symbol-tag">' + s + ' <span class="remove" onclick="removeSymbol(\'' + s + '\')" title="移除">&times;</span></span>';
+                    html += '<span class="symbol-tag">' + s + ' <span class="remove" onclick="removeSymbol(\'' + s + '\', true)" title="移除">&times;</span></span>';
                 });
                 tags.innerHTML = html;
                 document.getElementById('manageMsg').textContent = '';
@@ -1856,22 +1877,6 @@
             }).catch(function(e) { msg.textContent = '请求失败: ' + e.message; msg.style.color = 'var(--down)'; });
         }
 
-        function removeSymbol(symbol) {
-            if (!confirm('确定要移除 ' + symbol + ' 吗？')) return;
-            var msg = document.getElementById('manageMsg');
-            fetch('/api/symbols', {
-                method: 'DELETE',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({symbol: symbol})
-            }).then(function(r) { return r.json(); }).then(function(data) {
-                if (data.error) { msg.textContent = data.error; msg.style.color = 'var(--down)'; }
-                else {
-                    msg.textContent = '已移除 ' + symbol + '，重启后生效';
-                    msg.style.color = 'var(--up)';
-                    loadManageView();
-                }
-            }).catch(function(e) { msg.textContent = '请求失败: ' + e.message; msg.style.color = 'var(--down)'; });
-        }
 
         // ====== Init ======
         loadPositionsFromServer().then(function() {

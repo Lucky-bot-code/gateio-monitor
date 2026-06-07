@@ -29,7 +29,7 @@ import requests
 from flask import Flask, jsonify, render_template, request, Response
 
 from monitor import MonitorCore, get_session, BASE_URL, CONFIG_FILE, _api_sem
-from alerts import analyze_turning_points, analyze_extreme_signals, check_short_period_subscriptions
+from alerts import analyze_turning_points, analyze_extreme_signals, check_short_period_subscriptions, init_short_flip_baseline
 from state import (
     load_positions, save_positions,
     load_price_alerts, save_price_alerts,
@@ -507,10 +507,10 @@ def _refresh_short_data(intervals):
 
 
 def _1m_refresh_delay() -> float:
-    """计算到下一个 1 分钟 K 线收盘前 5 秒的等待秒数"""
+    """计算到下一个 1 分钟 K 线收盘前 10 秒的等待秒数（与 5m 对齐）"""
     now = datetime.now(timezone.utc)
     ns = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
-    delay = (ns - now).total_seconds() - 5  # K 线收盘前 5s 拉，蜡烛走了 55s
+    delay = (ns - now).total_seconds() - 10  # K 线收盘前 10s 拉
     if delay < 2:
         delay += 60
     return delay
@@ -1004,6 +1004,9 @@ def api_symbols_remove():
         return jsonify({"error": f"{symbol} not found"}), 404
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
+    # 同步清理 in-memory cache，避免 SSE/轮询把卡片复活
+    cache["data"] = [d for d in cache["data"] if d["symbol"] != symbol]
+    cache["turning_points"] = [t for t in cache["turning_points"] if t["symbol"] != symbol]
     return jsonify({"status": "ok", "symbol": symbol})
 
 
@@ -1092,7 +1095,22 @@ def api_wecom_sub_toggle():
         save_wecom_subscriptions(wecom_subscriptions)
         return jsonify({"status": "ok", "subscribed": False, "subscriptions": wecom_subscriptions})
     else:
-        # 订阅
+        # 订阅：先快照当前 MA10/SAR 状态作为翻转检测基线
+        for item in cache.get("data", []):
+            if item["symbol"] == symbol:
+                for iv in item.get("intervals", []):
+                    if iv["interval"] == interval:
+                        trend = iv.get("trend", "")
+                        ma10_dir = "bullish" if "上涨" in trend else ("bearish" if "下跌" in trend else "neutral")
+                        init_short_flip_baseline(
+                            symbol, interval,
+                            ma10_dir,
+                            iv.get("sar_direction", "neutral"),
+                            iv.get("consecutive", 0),
+                            iv.get("sar_consecutive", 0)
+                        )
+                        break
+                break
         wecom_subscriptions[symbol].append(interval)
         save_wecom_subscriptions(wecom_subscriptions)
         return jsonify({"status": "ok", "subscribed": True, "subscriptions": wecom_subscriptions})

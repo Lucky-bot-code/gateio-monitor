@@ -1,0 +1,16 @@
+[Unit]
+Description=Gate.io MA10 Trend Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/gateio-monitor
+ExecStart=/usr/bin/python3 app.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/gateio-monitor/monitor.log
+StandardError=append:/opt/gateio-monitor/monitor.log
+
+[Install]
+WantedBy=multi-user.target
