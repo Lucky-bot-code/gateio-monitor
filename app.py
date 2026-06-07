@@ -432,46 +432,49 @@ def auto_refresh_loop():
 
 # ============ 短周期快速刷新 ============
 
-_fast_refresh_lock = threading.Lock()
+_cache_lock = threading.Lock()
 
 
-def fast_refresh_data():
-    """快速刷新：仅获取 5m/1m 数据，合并到缓存，不跑预警"""
+def _refresh_short_data(intervals):
+    """独立刷新指定短周期数据（5m 或 1m），互不干扰"""
     global cache
-    if not _fast_refresh_lock.acquire(blocking=False):
-        return  # 上一轮还没跑完，跳过
-    try:
-        monitor = MonitorCore()
-        if not monitor.symbols:
-            return
-        fast_data = monitor.analyze_fast()
-        # 合并 5m/1m 数据到主缓存
+    iv_keys = [iv_key for iv_key, _ in intervals]
+    iv_names = [name for _, name in intervals]
+
+    # 数据获取在锁外执行（API 调用不阻塞对方）
+    monitor = MonitorCore()
+    if not monitor.symbols:
+        return
+    short_data = monitor.analyze_short(intervals)
+
+    with _cache_lock:
+        # 合并短周期数据到主缓存（仅替换当前 intervals 对应的周期）
         existing = cache.get("data", [])
-        fast_map = {d["symbol"]: d for d in fast_data}
+        short_map = {d["symbol"]: d for d in short_data}
         for item in existing:
-            fast_item = fast_map.get(item["symbol"])
-            if not fast_item:
+            short_item = short_map.get(item["symbol"])
+            if not short_item:
                 continue
             # 替换 price 相关字段
             for key in ("last", "change_pct", "volume_24h"):
-                if fast_item.get(key) is not None:
-                    item[key] = fast_item[key]
-            # 替换 5m/1m interval
+                if short_item.get(key) is not None:
+                    item[key] = short_item[key]
+            # 仅替换当前 intervals 对应的周期
             existing_ivs = item.get("intervals", [])
-            fast_iv_map = {iv["interval"]: iv for iv in fast_item.get("intervals", [])}
+            short_iv_map = {iv["interval"]: iv for iv in short_item.get("intervals", [])}
             new_ivs = []
             for iv in existing_ivs:
-                if iv["interval"] in ("5m", "1m"):
-                    replacement = fast_iv_map.get(iv["interval"])
+                if iv["interval"] in iv_keys:
+                    replacement = short_iv_map.get(iv["interval"])
                     if replacement:
                         new_ivs.append(replacement)
                         continue
                 new_ivs.append(iv)
             item["intervals"] = new_ivs
         cache["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # 短周期企业微信订阅推送（必须在 SSE 推送前，确保前端收到的是已取消的订阅列表）
+        # 短周期企业微信订阅推送（必须在 SSE 推送前）
         if wecom_subscriptions:
-            short_alerts = check_short_period_subscriptions(fast_data, wecom_subscriptions)
+            short_alerts = check_short_period_subscriptions(short_data, wecom_subscriptions)
             if short_alerts:
                 pushed = 0
                 unsub_list = []
@@ -501,13 +504,9 @@ def fast_refresh_data():
             "updating": False,
             "next_refresh_in": get_next_refresh_in(),
         })
-    except Exception as e:
-        print(f"[WARN] Fast refresh failed: {e}", file=sys.stderr)
-    finally:
-        _fast_refresh_lock.release()
 
 
-def _fast_refresh_delay() -> float:
+def _1m_refresh_delay() -> float:
     """计算到下一个 1 分钟 K 线收盘前 5 秒的等待秒数"""
     now = datetime.now(timezone.utc)
     ns = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
@@ -517,12 +516,37 @@ def _fast_refresh_delay() -> float:
     return delay
 
 
-def fast_refresh_loop():
-    """后台快速刷新线程 - 每 60s 拉 5m/1m 数据"""
+def _5m_refresh_delay() -> float:
+    """计算到下一个 5 分钟 K 线收盘前 10 秒的等待秒数"""
+    now = datetime.now(timezone.utc)
+    block = now.minute // 5
+    next_minute = (block + 1) * 5
+    if next_minute >= 60:
+        ns = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    else:
+        ns = now.replace(minute=next_minute, second=0, microsecond=0)
+    delay = (ns - now).total_seconds() - 10  # 收盘前 10s
+    if delay < 2:
+        delay += 300  # 5 minutes
+    return delay
+
+
+def _1m_refresh_loop():
+    """后台 1m 快刷新线程"""
+    intervals = [("1m", "1分钟")]
     while True:
-        delay = _fast_refresh_delay()
+        delay = _1m_refresh_delay()
         time.sleep(delay)
-        fast_refresh_data()
+        _refresh_short_data(intervals)
+
+
+def _5m_refresh_loop():
+    """后台 5m 快刷新线程"""
+    intervals = [("5m", "5分钟")]
+    while True:
+        delay = _5m_refresh_delay()
+        time.sleep(delay)
+        _refresh_short_data(intervals)
 
 
 # ============ 中途检查调度器 ============
@@ -1132,7 +1156,8 @@ if __name__ == "__main__":
 
     threading.Thread(target=refresh_data, daemon=True).start()
     threading.Thread(target=auto_refresh_loop, daemon=True).start()
-    threading.Thread(target=fast_refresh_loop, daemon=True).start()
+    threading.Thread(target=_1m_refresh_loop, daemon=True).start()
+    threading.Thread(target=_5m_refresh_loop, daemon=True).start()
     threading.Thread(target=_mid_check_loop, daemon=True).start()
 
     logging.getLogger("werkzeug").setLevel(logging.ERROR)

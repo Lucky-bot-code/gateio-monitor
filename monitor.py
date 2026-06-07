@@ -411,8 +411,8 @@ class MonitorCore:
 
     _FAST_INTERVALS = [("5m", "5分钟"), ("1m", "1分钟")]
 
-    def _fetch_symbol_data_fast(self, sym_info: Dict) -> Dict:
-        """仅获取 ticker + 5m/1m 短周期数据"""
+    def _fetch_symbol_data_short(self, sym_info: Dict, intervals) -> Dict:
+        """仅获取 ticker + 指定短周期数据"""
         contract = sym_info["contract"]
         user_symbol = sym_info.get("user_symbol", contract)
         result = {"symbol": user_symbol, "contract": contract, "intervals": []}
@@ -428,7 +428,7 @@ class MonitorCore:
             result["change_pct"] = None
             result["volume_24h"] = None
 
-        for interval, interval_name in self._FAST_INTERVALS:
+        for interval, interval_name in intervals:
             time.sleep(REQUEST_DELAY)
             try:
                 iv_data = self._process_interval(contract, interval, interval_name, session)
@@ -444,21 +444,22 @@ class MonitorCore:
             result["intervals"].append(iv_data)
         return result
 
-    def analyze_fast(self) -> List[Dict]:
-        """快速刷新：仅获取 5m/1m 短周期数据"""
+    def analyze_short(self, intervals) -> List[Dict]:
+        """快速刷新：仅获取指定短周期数据"""
         results = []
         total = len(self.symbols)
         if total == 0:
             return results
         workers = min(5, max(3, total // 20))
-        print(f"[FAST] Fast refresh {total} symbols, {workers} workers...")
+        iv_names = [name for _, name in intervals]
+        print(f"[SHORT] Fast refresh {total} symbols ({', '.join(iv_names)}), {workers} workers...")
 
         progress_lock = threading.Lock()
         completed = [0]
 
         def process_one(idx_sym):
             idx, sym_info = idx_sym
-            data = self._fetch_symbol_data_fast(sym_info)
+            data = self._fetch_symbol_data_short(sym_info, intervals)
             with progress_lock:
                 completed[0] += 1
             return idx, data
@@ -482,6 +483,10 @@ class MonitorCore:
         results = [r for r in results if r is not None]
         print(f"[ OK ] Fast refresh complete.")
         return results
+
+    def analyze_fast(self) -> List[Dict]:
+        """兼容旧接口：快速刷新 5m/1m 短周期数据"""
+        return self.analyze_short(self._FAST_INTERVALS)
 
     def analyze_all(self, progress_callback=None) -> List[Dict]:
         results = []
