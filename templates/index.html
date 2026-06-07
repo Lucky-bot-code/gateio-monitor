@@ -1056,12 +1056,40 @@
                 btn.onclick = function(e2) { e2.stopPropagation(); selectPosition(symbol, opt.value); };
                 dropdown.appendChild(btn);
             });
+            // 分割线 + 去除标的
+            var sep = document.createElement('div');
+            sep.style.cssText = 'border-top:1px solid var(--border);margin:4px 8px';
+            dropdown.appendChild(sep);
+            var rmBtn = document.createElement('button');
+            rmBtn.className = 'pos-dropdown-option';
+            rmBtn.textContent = '✕ 去除标的';
+            rmBtn.style.color = 'var(--down)';
+            rmBtn.onclick = function(e2) { e2.stopPropagation(); removeSymbol(symbol); };
+            dropdown.appendChild(rmBtn);
+
             var left = Math.max(4, rect.left);
             if (left + 70 > window.innerWidth - 4) left = window.innerWidth - 74;
             dropdown.style.top = (rect.bottom + 4) + 'px';
             dropdown.style.left = left + 'px';
             document.body.appendChild(dropdown);
             setTimeout(function() { document.addEventListener('click', closePositionDropdown); }, 0);
+        }
+        async function removeSymbol(symbol) {
+            closePositionDropdown();
+            if (!confirm('确认从监控列表移除 ' + symbol + ' ？')) return;
+            try {
+                var res = await fetch('/api/symbols', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol: symbol })
+                });
+                var data = await res.json();
+                if (data.error) { alert(data.error); return; }
+                var card = document.getElementById('card-' + symbol);
+                if (card) card.remove();
+                if (dataCache) dataCache = dataCache.filter(function(d) { return d.symbol !== symbol; });
+                if (typeof renderCards === 'function') renderCards(dataCache);
+            } catch(e) { alert('移除失败: ' + e.message); }
         }
         function closePositionDropdown(e) {
             var ex = document.getElementById('posDropdown');
