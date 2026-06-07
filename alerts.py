@@ -7,6 +7,8 @@ from typing import List, Dict, Optional, Tuple
 
 # ============ 蜡烛成熟度门控 ============
 
+DOMINANCE_RATIO = 3  # 翻转方旧连续次数须 ≥ 对方当前次数 × N，才算"主导方投降"
+
 _MATURITY_REMAINING = {
     "1d": 7200,    # 剩余 < 2h
     "4h": 1800,    # 剩余 < 30m
@@ -362,6 +364,12 @@ def check_short_period_subscriptions(data: List[Dict], wecom_subscriptions: Dict
             prev = _SHORT_FLIP_STATE.get(sym, {}).get(interval) or {}
             prev_ma10 = prev.get("ma10_dir")
             prev_sar = prev.get("sar_dir")
+            prev_ma10_cons = prev.get("ma10_cons", 0)
+            prev_sar_cons = prev.get("sar_cons", 0)
+
+            # 当前连续次数
+            cur_ma10_cons = iv.get("consecutive", 0)
+            cur_sar_cons = iv.get("sar_consecutive", 0)
 
             alert = None
 
@@ -370,13 +378,30 @@ def check_short_period_subscriptions(data: List[Dict], wecom_subscriptions: Dict
                 if sar_dir == ma10_dir:
                     alert = "买入信号" if ma10_dir == "bullish" else "卖出信号"
 
-            # 路径 B: SAR 刚翻转 → 验证 MA10 同向
-            if alert is None and sar_flip and sar_dir != prev_sar and prev_sar is not None:
+            # 路径 B: SAR 方向变化（不依赖瞬时 sar_flip，避免翻转过期漏报）→ 验证 MA10 同向
+            if alert is None and sar_dir != prev_sar and prev_sar is not None and sar_dir != "neutral":
                 if ma10_dir == sar_dir:
                     alert = "买入信号" if sar_dir == "bullish" else "卖出信号"
 
-            # 更新状态
-            _SHORT_FLIP_STATE.setdefault(sym, {})[interval] = {"ma10_dir": ma10_dir, "sar_dir": sar_dir}
+            # 噪音过滤：反向基线时，弱势方（连续次数少）翻转不报警
+            # 翻转方的旧连续次数须 ≥ 对方当前次数 × 3，才算"主导方投降"
+            if alert and prev_ma10 and prev_sar and prev_ma10 != prev_sar:
+                if ma10_dir != prev_ma10:
+                    # MA10 翻转：检查 MA10 是否是主导方
+                    if prev_ma10_cons < cur_sar_cons * DOMINANCE_RATIO:
+                        alert = None
+                elif sar_dir != prev_sar:
+                    # SAR 翻转：检查 SAR 是否是主导方
+                    if prev_sar_cons < cur_ma10_cons * DOMINANCE_RATIO:
+                        alert = None
+
+            # 更新状态（含连续次数）
+            _SHORT_FLIP_STATE.setdefault(sym, {})[interval] = {
+                "ma10_dir": ma10_dir,
+                "sar_dir": sar_dir,
+                "ma10_cons": cur_ma10_cons,
+                "sar_cons": cur_sar_cons,
+            }
 
             if alert:
                 path = "MA10先转" if ma10_dir != prev_ma10 else "SAR先转"

@@ -199,6 +199,22 @@
       "change_percentage": 0,
       "volume_24h_quote": 0,
       "manual": true
+    },
+    {
+      "user_symbol": "SIRENUSDT",
+      "contract": "SIREN_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0,
+      "manual": true
+    },
+    {
+      "user_symbol": "BSBUSDT",
+      "contract": "BSB_USDT",
+      "last": 0,
+      "change_percentage": 0,
+      "volume_24h_quote": 0,
+      "manual": true
     }
   ],
   "unavailable": [],
