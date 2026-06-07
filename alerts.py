@@ -12,6 +12,8 @@ _MATURITY_REMAINING = {
     "4h": 1800,    # 剩余 < 30m
     "1h": 600,     # 剩余 < 10m
     "15m": 120,    # 剩余 < 2m
+    "5m": 60,      # 剩余 < 60s（快刷新每 60s 跑，只在 5m 蜡烛最后 1 分钟触发）
+    "1m": 10,      # 剩余 < 10s（快刷新提前 5s 拉，蜡烛走了 55s）
 }
 
 
@@ -36,6 +38,15 @@ def _get_candle_end(interval: str) -> float:
             ns = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
         else:
             ns = now.replace(minute=next_minute, second=0, microsecond=0)
+    elif interval == "5m":
+        block = now.minute // 5
+        next_minute = (block + 1) * 5
+        if next_minute >= 60:
+            ns = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        else:
+            ns = now.replace(minute=next_minute, second=0, microsecond=0)
+    elif interval == "1m":
+        ns = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
     else:
         return now.timestamp() + 3600
     return ns.timestamp()
@@ -329,6 +340,13 @@ def check_short_period_subscriptions(data: List[Dict], wecom_subscriptions: Dict
                 continue
             if interval not in wecom_subscriptions[sym]:
                 continue
+
+            # 蜡烛成熟度门控
+            max_remain = _MATURITY_REMAINING.get(interval)
+            if max_remain is not None:
+                remaining = _get_candle_end(interval) - datetime.now(timezone.utc).timestamp()
+                if remaining > max_remain:
+                    continue
 
             # 当前 MA10 方向
             trend = iv.get("trend", "")
