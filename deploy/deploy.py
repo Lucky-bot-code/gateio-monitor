@@ -23,6 +23,9 @@ EXCLUDE = {
     ".git", "__pycache__", ".ma10_state.json", "positions.json",
     "price_alerts.json", "short_flip_state.json", "tp_state.json",
     "klines.db", ".claude",
+    # 服务器运行时状态，部署时保留
+    "gateio_available_symbols.json", "wecom_subscriptions.json",
+    "extreme_sent.json",
 }
 
 EXCLUDE_PREFIX = ("tmp", "binance_", "finnhub_", "test_")
@@ -100,11 +103,21 @@ set -e
 # 停止旧服务
 systemctl stop {SERVICE_NAME} 2>/dev/null || true
 
+# 备份运行时状态文件
+mkdir -p /tmp/gateio-state
+for f in gateio_available_symbols.json wecom_subscriptions.json extreme_sent.json .ma10_state.json positions.json price_alerts.json short_flip_state.json tp_state.json klines.db; do
+    [ -f {APP_DIR}/$f ] && cp {APP_DIR}/$f /tmp/gateio-state/ || true
+done
+
 # 清理旧目录、解压新文件
 rm -rf {APP_DIR}
 mkdir -p {APP_DIR}
 tar xzf {remote_tar} -C {APP_DIR}
 rm -f {remote_tar}
+
+# 恢复运行时状态文件
+[ -n "$(ls -A /tmp/gateio-state 2>/dev/null)" ] && cp /tmp/gateio-state/* {APP_DIR}/ || true
+rm -rf /tmp/gateio-state
 
 # 安装依赖
 pip3 install flask requests PySocks -q 2>&1 | tail -1
