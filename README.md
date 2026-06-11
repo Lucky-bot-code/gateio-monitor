@@ -1,11 +1,11 @@
-# Gate.io MA10 趋势监控系统 v3.5.3
+# Gate.io MA10 趋势监控系统 v3.5.4
 
 基于 **Gate.io U本位永续合约 API** 的 MA10（10周期移动平均线）趋势监控系统。支持 **Web 可视化面板** 和 **命令行脚本**，实时监控加密货币与美股代币的多周期趋势。
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-2.0%2B-green)](https://flask.palletsprojects.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-v3.5.3-brightgreen)](.)
+[![Version](https://img.shields.io/badge/Version-v3.5.4-brightgreen)](.)
 
 ---
 
@@ -207,6 +207,7 @@ PROXY_URL = None
 
 | 日期 | 版本 | 更新内容 |
 |------|------|----------|
+| 2026-06-11 | **v3.5.4** | 短周期噪音过滤差值方案：基线反向时连续次数差值 ≥ 10 只报强方翻转，< 10 势均力敌不抑制 |
 | 2026-06-08 | **v3.5.3** | 去除标的即时反馈修复（前端同名函数合并 + 后端 DELETE 同步清理 cache 防 SSE 回灌）；短周期订阅基线机制（订阅时快照 MA10/SAR 状态作为固定基线，始终与基线对比检测翻转，告警后清理）；1m 刷新与 5m 对齐（统一收盘前 10s）；前端 removeSymbol 函数去重合并 |
 | 2026-06-07 | **v3.5.2** | 短周期订阅修复：Path B SAR 翻转子浪检测扩展（`sar_flip`→`sar_dir` 方向变化，不再仅依赖最新2根K线瞬时翻转，修复翻转过期漏报）；Path A 首次订阅静默建立基线（`prev_ma10 is not None` 守卫回退，订阅时不误报，翻转才触发）；DOMINANCE_RATIO=3 噪音过滤（反向基线时翻转方旧连续次数须≥对方×3，弱势方投降抑制） |
 | 2026-06-07 | **v3.5.1** | 5m/1m 快刷新拆分：原 60s 统一循环 → 1m 每 ~55s 独立刷新 + 5m 每 ~295s 独立刷新；共享缓存锁；5m 前端不再每分钟跳动 |
