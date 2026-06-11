@@ -7,7 +7,7 @@ from typing import List, Dict, Optional, Tuple
 
 # ============ 蜡烛成熟度门控 ============
 
-DOMINANCE_RATIO = 3  # 翻转方旧连续次数须 ≥ 对方当前次数 × N，才算"主导方投降"
+NOISE_DIFF_THRESHOLD = 10  # 基线方向相反时，连续次数差值>=N则只报强方翻转
 
 _MATURITY_REMAINING = {
     "1d": 7200,    # 剩余 < 2h
@@ -401,13 +401,13 @@ def check_short_period_subscriptions(data: List[Dict], wecom_subscriptions: Dict
             if alert is None and bl_sar and sar_dir != bl_sar and sar_dir != "neutral" and ma10_dir == sar_dir:
                 alert = "买入信号" if sar_dir == "bullish" else "卖出信号"
 
-            # 噪音过滤：基线方向相反时，弱势方翻转不报警
+            # 噪音过滤：基线方向相反时，差值>=N只报强方翻转，差值<N不抑制
             if alert and bl_ma10 and bl_sar and bl_ma10 != bl_sar:
-                if ma10_dir != bl_ma10:
-                    if bl_ma10_cons < cur_sar_cons * DOMINANCE_RATIO:
-                        alert = None
-                elif sar_dir != bl_sar:
-                    if bl_sar_cons < cur_ma10_cons * DOMINANCE_RATIO:
+                diff = abs(bl_ma10_cons - bl_sar_cons)
+                if diff >= NOISE_DIFF_THRESHOLD:
+                    ma10_is_strong = bl_ma10_cons > bl_sar_cons
+                    ma10_flipped = (ma10_dir != bl_ma10)
+                    if ma10_is_strong != ma10_flipped:  # 翻的不是强方 → 抑制
                         alert = None
 
             if alert:
